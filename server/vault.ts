@@ -272,18 +272,35 @@ export async function getConnectionSummaries(
   return PROVIDER_IDS.map((providerId) => {
     const meta = PROVIDER_REGISTRY[providerId];
     const stored = docs.get(providerId);
+    const hasPersonalKey = Boolean(stored && stored.status === 'connected');
     const adminMeta =
-      options?.isPremium && (!stored || stored.status !== 'connected')
+      options?.isPremium && !hasPersonalKey
         ? getAdminSharedKeyMetadata(providerId)
         : null;
-    const usingAdmin = Boolean(adminMeta?.configured && adminMeta.status === 'connected');
+    const usingDirectAdmin = Boolean(adminMeta?.configured && adminMeta.status === 'connected');
+    const usingChatGptAlias =
+      Boolean(options?.isPremium) &&
+      providerId === 'openai' &&
+      !hasPersonalKey &&
+      !usingDirectAdmin &&
+      Boolean(getAdminSharedKeyMetadata('google').configured || authoritativeProviderStates?.openai?.connected);
+    const usingAdmin = usingDirectAdmin || usingChatGptAlias;
+    const effectiveAdminMeta = usingDirectAdmin
+      ? adminMeta
+      : usingChatGptAlias
+        ? getAdminSharedKeyMetadata('google')
+        : null;
 
     const runtimeHealth = getProviderHealth(uid, providerId);
     const liveOverride = authoritativeProviderStates?.[providerId];
 
     let healthState: ProviderHealthState;
     if (usingAdmin) {
-      healthState = liveOverride ? liveOverride.healthState : runtimeHealth.state;
+      healthState = liveOverride
+        ? liveOverride.healthState
+        : usingChatGptAlias
+          ? 'inference_ready'
+          : runtimeHealth.state;
     } else if (!stored || stored.status === 'disconnected') {
       healthState = 'disconnected';
     } else if (stored.status === 'error') {
@@ -306,12 +323,12 @@ export async function getConnectionSummaries(
           runtimeHealth.message ||
           (stored?.status === 'error'
             ? stored.lastError || 'Invalid credentials or verification error'
-            : adminMeta?.lastError || null);
+            : effectiveAdminMeta?.lastError || null);
 
     const liveDiscovered =
       liveOverride?.discoveredCount ??
       getDiscoveredCatalogCache(uid, providerId)?.length ??
-      (usingAdmin ? adminMeta?.availableModelsCount || 0 : 0);
+      (usingChatGptAlias ? 1 : usingDirectAdmin ? effectiveAdminMeta?.availableModelsCount || 0 : 0);
 
     const liveInferenceReady =
       healthState === 'insufficient_credits' ||
@@ -320,7 +337,8 @@ export async function getConnectionSummaries(
       healthState === 'unavailable' ||
       healthState === 'disconnected'
         ? 0
-        : liveOverride?.inferenceReadyCount ?? getVerifiedModelsCount(uid, providerId);
+        : liveOverride?.inferenceReadyCount ??
+          (usingChatGptAlias ? 1 : getVerifiedModelsCount(uid, providerId));
 
     return {
       providerId,
@@ -334,8 +352,8 @@ export async function getConnectionSummaries(
         : stored
           ? stored.keyFingerprint
           : null,
-      verifiedAt: usingAdmin ? adminMeta?.verifiedAt || null : stored ? stored.verifiedAt : null,
-      lastError: usingAdmin ? adminMeta?.lastError || null : stored?.lastError || null,
+      verifiedAt: usingAdmin ? effectiveAdminMeta?.verifiedAt || null : stored ? stored.verifiedAt : null,
+      lastError: usingAdmin ? effectiveAdminMeta?.lastError || null : stored?.lastError || null,
       availableModelsCount: liveInferenceReady,
       discoveredModelsCount: liveDiscovered,
       oauthSupported: meta.oauthSupported,

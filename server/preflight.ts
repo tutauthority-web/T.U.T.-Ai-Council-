@@ -5,6 +5,11 @@ import type {
   PreflightReport,
   ProviderId,
 } from '../src/shared/types.ts';
+import { isChatGptAliasModelId, isManagedSeatModelId } from '../src/shared/providers.ts';
+import {
+  buildChatGptAliasModelInfo,
+  buildManagedSeatModelInfo,
+} from './chatgptAlias.ts';
 import { getCatalogForUser, probeSingleModel } from './modelCatalogService.ts';
 import { parseCompositeModel } from './orchestrator.ts';
 import { resolveRuntimeApiKey } from './vault.ts';
@@ -89,6 +94,34 @@ export async function runCouncilPreflight(params: {
     const { provider, modelId } = parseCompositeModel(compositeId);
     const pState = catalog.providerStates[provider];
     const pName = getProviderConfig(provider)?.name || provider;
+    const isChatGptAlias =
+      Boolean(params.isPremium) && provider === 'openai' && isChatGptAliasModelId(modelId);
+    const isOpaqueManaged = Boolean(params.isPremium) && isManagedSeatModelId(modelId);
+
+    if (isChatGptAlias) {
+      const directOpenAiKey = await getKey('openai');
+      const gState = catalog.providerStates.google;
+      const gKey = await getKey('google');
+      if (
+        (!directOpenAiKey || pState?.healthState === 'invalid_credentials') &&
+        gState?.connected &&
+        gState.healthState !== 'invalid_credentials' &&
+        gState.healthState !== 'insufficient_credits' &&
+        gKey
+      ) {
+        if (!seenReady.has(compositeId)) {
+          seenReady.add(compositeId);
+          const slotMatch = /(\d+)$/.exec(modelId);
+          const aliasInfo = buildChatGptAliasModelInfo(slotMatch ? Number(slotMatch[1]) : 1);
+          readyModels.push({
+            ...aliasInfo,
+            compositeId,
+            modelId,
+          });
+        }
+        continue;
+      }
+    }
 
     if (!pState || !pState.connected) {
       rejectedModels.push({
@@ -139,6 +172,30 @@ export async function runCouncilPreflight(params: {
         reason: pState.message || `Provider "${pName}" is unavailable.`,
         errorCategory: 'invalid_model',
       });
+      continue;
+    }
+
+    if (isOpaqueManaged) {
+      const hasUsableForProvider = catalog.models.some(
+        (m) => m.provider === provider && m.available,
+      );
+      const apiKey = await getKey(provider);
+      if (!hasUsableForProvider || !apiKey) {
+        rejectedModels.push({
+          compositeId,
+          provider,
+          modelId,
+          availabilityState: 'unavailable',
+          available: false,
+          reason: `Managed provider "${pName}" has no active engine right now.`,
+          errorCategory: 'invalid_model',
+        });
+        continue;
+      }
+      if (!seenReady.has(compositeId)) {
+        seenReady.add(compositeId);
+        readyModels.push(buildManagedSeatModelInfo(provider, modelId));
+      }
       continue;
     }
 

@@ -489,3 +489,48 @@ export function createEmptyProviderStateMap<T>(
   }
   return map;
 }
+
+export function isChatGptAliasModelId(modelId: string): boolean {
+  const lower = (modelId || '').trim().toLowerCase();
+  return lower === 'chatgpt' || lower === 'chatgpt-auto' || /^chatgpt-\d+$/.test(lower);
+}
+
+export function isManagedSeatModelId(modelId: string): boolean {
+  const lower = (modelId || '').trim().toLowerCase();
+  return isChatGptAliasModelId(lower) || /^managed(?:-[a-z0-9]+)*$/i.test(lower);
+}
+
+export function getProviderDisplayName(
+  providerId: ProviderId,
+  options?: { aliasChatGpt?: boolean },
+): string {
+  if (providerId === 'openai' && options?.aliasChatGpt) {
+    return 'ChatGPT';
+  }
+  return PROVIDER_REGISTRY[providerId]?.name || providerId;
+}
+
+export function formatParticipantDisplayLabel(opts: {
+  provider: ProviderId | 'user';
+  modelId?: string;
+  modelLabel?: string;
+  hideModelDetails?: boolean;
+  seatLabel?: string;
+}): string {
+  if (opts.provider === 'user') {
+    return opts.modelLabel || 'You';
+  }
+  const mid = opts.modelId || '';
+  if (isChatGptAliasModelId(mid)) {
+    return opts.seatLabel ? `ChatGPT · ${opts.seatLabel}` : 'ChatGPT';
+  }
+  if (opts.hideModelDetails || isManagedSeatModelId(mid)) {
+    const baseName = PROVIDER_REGISTRY[opts.provider]?.name || opts.provider;
+    return opts.seatLabel ? `${baseName} · ${opts.seatLabel}` : baseName;
+  }
+  const fallback = mid
+    ? `${PROVIDER_REGISTRY[opts.provider]?.shortName || opts.provider} · ${mid}`
+    : PROVIDER_REGISTRY[opts.provider]?.name || opts.provider;
+  return opts.modelLabel || fallback;
+}
+

@@ -40,6 +40,11 @@ import {
   subscribeReactionHistory,
 } from '../../lib/reactionHistory';
 import {
+  formatParticipantDisplayLabel,
+  isChatGptAliasModelId,
+  isManagedSeatModelId,
+} from '../../shared/providers';
+import {
   QUICK_REACTION_EMOJIS,
   REACTION_PACK_CATEGORIES,
   type CouncilMessageDoc,
@@ -552,6 +557,7 @@ function ReactionInspectorPopover({
   activeTabGroup,
   canToggle,
   duplicateModelSet,
+  hideModelDetails = false,
   onSelectTab,
   onToggleUserReaction,
   onClose,
@@ -565,6 +571,7 @@ function ReactionInspectorPopover({
   activeTabGroup: GroupedReaction | null;
   canToggle: boolean;
   duplicateModelSet?: Set<string>;
+  hideModelDetails?: boolean;
   onSelectTab: (tab: string) => void;
   onToggleUserReaction?: (emoji: string) => void;
   onClose: () => void;
@@ -676,6 +683,18 @@ function ReactionInspectorPopover({
           {activeRows.map((r, i) => {
             const meta = parseReactorIdentity(r);
             const isSelf = r.reactorId === 'user' || r.reactorType === 'user';
+            const maskReactorModel =
+              !isSelf &&
+              Boolean(meta.modelId) &&
+              (hideModelDetails || (meta.modelId ? isManagedSeatModelId(meta.modelId) : false));
+            const reactorTitle = isSelf
+              ? meta.displayName
+              : formatParticipantDisplayLabel({
+                  provider: meta.provider,
+                  modelId: meta.modelId || undefined,
+                  modelLabel: meta.displayName,
+                  hideModelDetails,
+                });
             return (
               <div
                 key={`${r.reactorId}-${r.emoji}-${i}`}
@@ -693,9 +712,9 @@ function ReactionInspectorPopover({
                   />
                   <div className="min-w-0">
                     <div className="text-xs font-medium text-[#F4F7FD] truncate">
-                      {meta.displayName}
+                      {reactorTitle}
                     </div>
-                    {meta.modelId && (
+                    {meta.modelId && !maskReactorModel && (
                       <div className="text-[10px] font-mono text-[#8E9BB3] truncate">
                         {meta.modelId}
                       </div>
@@ -746,6 +765,7 @@ function ReactionChipsBar({
   alignRight,
   canToggle,
   duplicateModelSet,
+  hideModelDetails = false,
   onToggleUserReaction,
   onOpenPack,
 }: {
@@ -754,6 +774,7 @@ function ReactionChipsBar({
   alignRight?: boolean;
   canToggle: boolean;
   duplicateModelSet?: Set<string>;
+  hideModelDetails?: boolean;
   onToggleUserReaction?: (emoji: string) => void;
   onOpenPack?: (triggerEl?: HTMLElement | null) => void;
 }) {
@@ -801,7 +822,16 @@ function ReactionChipsBar({
           const namesSummary = g.items
             .map((r) => {
               const meta = parseReactorIdentity(r);
-              return meta.modelId ? `${meta.displayName} (${meta.modelId})` : meta.displayName;
+              if (meta.role === 'user' || meta.provider === 'user') return meta.displayName;
+              const mask =
+                hideModelDetails || (meta.modelId ? isManagedSeatModelId(meta.modelId) : false);
+              const name = formatParticipantDisplayLabel({
+                provider: meta.provider,
+                modelId: meta.modelId || undefined,
+                modelLabel: meta.displayName,
+                hideModelDetails,
+              });
+              return meta.modelId && !mask ? `${name} (${meta.modelId})` : name;
             })
             .join(', ');
 
@@ -914,6 +944,7 @@ function ReactionChipsBar({
         activeTabGroup={activeTabGroup}
         canToggle={canToggle}
         duplicateModelSet={duplicateModelSet}
+        hideModelDetails={hideModelDetails}
         onSelectTab={setInspectorTab}
         onToggleUserReaction={(emoji) => {
           if (activeTabGroup && !activeTabGroup.userReacted) {
@@ -1011,20 +1042,30 @@ function QuotedReplyCard({
   replyTo,
   alignRight,
   duplicateModelSet,
+  hideModelDetails = false,
   onJumpToMessage,
 }: {
   replyTo: ReplyToRef;
   alignRight?: boolean;
   duplicateModelSet?: Set<string>;
+  hideModelDetails?: boolean;
   onJumpToMessage?: (messageId: string) => void;
 }) {
   const visual = getProviderVisual(replyTo.provider);
-  const senderLabel =
+  const maskReplyModel =
+    replyTo.role !== 'user' &&
+    (hideModelDetails || isManagedSeatModelId(replyTo.modelId || ''));
+  const baseSender =
     replyTo.role === 'user' || replyTo.provider === 'user'
       ? 'You'
-      : replyTo.role === 'moderator'
-        ? `${visual.shortName} Moderator`
-        : visual.shortName;
+      : formatParticipantDisplayLabel({
+          provider: replyTo.provider,
+          modelId: replyTo.modelId,
+          modelLabel: replyTo.modelLabel,
+          hideModelDetails,
+        });
+  const senderLabel =
+    replyTo.role === 'moderator' ? `${baseSender} Moderator` : baseSender;
 
   return (
     <button
@@ -1061,7 +1102,7 @@ function QuotedReplyCard({
         >
           {senderLabel}
         </span>
-        {replyTo.role !== 'user' && replyTo.modelId && (
+        {replyTo.role !== 'user' && replyTo.modelId && !maskReplyModel && (
           <span className="font-mono text-[9.5px] opacity-65 truncate max-w-[140px]">
             {replyTo.modelId}
           </span>
@@ -1079,6 +1120,7 @@ export const MessageBubble = memo(function MessageBubble({
   copiedId,
   isCopied,
   duplicateModelSet,
+  hideModelDetails = false,
   onCopy,
   onToggleReaction,
   onReply,
@@ -1095,6 +1137,7 @@ export const MessageBubble = memo(function MessageBubble({
   copiedId?: string | null;
   isCopied?: boolean;
   duplicateModelSet?: Set<string>;
+  hideModelDetails?: boolean;
   onCopy: (id: string, text: string) => void;
   onToggleReaction?: (messageId: string, emoji: string) => void;
   onReply?: (item: CouncilMessageDoc | StreamingBufferItem) => void;
@@ -1410,6 +1453,7 @@ export const MessageBubble = memo(function MessageBubble({
                   replyTo={replyTo}
                   alignRight
                   duplicateModelSet={duplicateModelSet}
+                  hideModelDetails={hideModelDetails}
                   onJumpToMessage={onJumpToMessage}
                 />
               )}
@@ -1438,6 +1482,7 @@ export const MessageBubble = memo(function MessageBubble({
             alignRight
             canToggle={canReact}
             duplicateModelSet={duplicateModelSet}
+            hideModelDetails={hideModelDetails}
             onToggleUserReaction={(emoji) => onToggleReaction?.(id, emoji)}
             onOpenPack={openReactionPackAtElement}
           />
@@ -1565,15 +1610,35 @@ export const MessageBubble = memo(function MessageBubble({
         {/* Compact 1-line sender name */}
         <div className="relative flex flex-wrap items-center justify-between gap-2 mb-0.5 pl-0.5">
           <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 min-w-0">
-            <span
-              className="font-display font-semibold text-[11.5px] tracking-tight"
-              style={{ color: isModerator ? '#F6C453' : visual.accentHex }}
-            >
-              {visual.shortName}
-            </span>
-            <span className="font-mono text-[10.5px] text-[#8E9BB3] truncate max-w-[210px]">
-              {item.modelId}
-            </span>
+            {(() => {
+              const maskItemModel =
+                hideModelDetails || isManagedSeatModelId(item.modelId || '');
+              const senderName = isChatGptAliasModelId(item.modelId || '')
+                ? 'ChatGPT'
+                : hideModelDetails
+                  ? formatParticipantDisplayLabel({
+                      provider: item.provider,
+                      modelId: item.modelId,
+                      modelLabel: item.modelLabel,
+                      hideModelDetails: true,
+                    })
+                  : visual.shortName;
+              return (
+                <>
+                  <span
+                    className="font-display font-semibold text-[11.5px] tracking-tight"
+                    style={{ color: isModerator ? '#F6C453' : visual.accentHex }}
+                  >
+                    {senderName}
+                  </span>
+                  {!maskItemModel && (
+                    <span className="font-mono text-[10.5px] text-[#8E9BB3] truncate max-w-[210px]">
+                      {item.modelId}
+                    </span>
+                  )}
+                </>
+              );
+            })()}
             {isModerator && (
               <span className="inline-flex items-center gap-1 px-1.5 py-px rounded-full text-[9.5px] font-semibold bg-amber-400/15 border border-amber-300/30 text-amber-200">
                 <Scale className="w-2.5 h-2.5 text-amber-300" />
@@ -1627,8 +1692,13 @@ export const MessageBubble = memo(function MessageBubble({
 
             {errorDetailsOpen && (
               <div className="pt-1.5 border-t border-rose-500/20 text-[10.5px] text-rose-200/80 grid grid-cols-1 sm:grid-cols-2 gap-1 font-mono">
-                <span>Provider: {item.provider}</span>
-                <span>Model: {item.modelId}</span>
+                <span>
+                  Provider:{' '}
+                  {isChatGptAliasModelId(item.modelId || '') ? 'ChatGPT' : item.provider}
+                </span>
+                {!(hideModelDetails || isManagedSeatModelId(item.modelId || '')) && (
+                  <span>Model: {item.modelId}</span>
+                )}
                 {item.stageLabel && <span>Stage: {item.stageLabel}</span>}
                 <span>Round: {item.round}</span>
               </div>
@@ -1755,6 +1825,7 @@ export const MessageBubble = memo(function MessageBubble({
                 <QuotedReplyCard
                   replyTo={replyTo}
                   duplicateModelSet={duplicateModelSet}
+                  hideModelDetails={hideModelDetails}
                   onJumpToMessage={onJumpToMessage}
                 />
               )}
@@ -1821,6 +1892,7 @@ export const MessageBubble = memo(function MessageBubble({
           grouped={grouped}
           canToggle={canReact}
           duplicateModelSet={duplicateModelSet}
+          hideModelDetails={hideModelDetails}
           onToggleUserReaction={(emoji) => onToggleReaction?.(id, emoji)}
           onOpenPack={openReactionPackAtElement}
         />

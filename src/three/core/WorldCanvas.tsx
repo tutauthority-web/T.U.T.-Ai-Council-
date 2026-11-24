@@ -358,6 +358,34 @@ function AdaptiveBloomComposer({
   return null;
 }
 
+class WorldErrorBoundary extends React.Component<
+  {
+    onError: () => void;
+    children: React.ReactNode;
+  },
+  { hasError: boolean }
+> {
+  constructor(props: { onError: () => void; children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(): { hasError: boolean } {
+    return { hasError: true };
+  }
+
+  componentDidCatch() {
+    this.props.onError();
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return null;
+    }
+    return this.props.children;
+  }
+}
+
 export function WorldCanvas({
   children,
   cameraPosition = [0, 8.5, 16],
@@ -372,6 +400,7 @@ export function WorldCanvas({
 }: WorldCanvasProps) {
   const { isDay, qualityTier, reducedMotion, isMobileViewport, webglSupported } = useWorldTheme();
   const [contextLost, setContextLost] = useState(false);
+  const [renderCrashed, setRenderCrashed] = useState(false);
   const [isSoftwareGl, setIsSoftwareGl] = useState(false);
   const [bloomSupported, setBloomSupported] = useState(true);
   const labelRegistry = useMemo(() => new WorldLabelRegistry(), []);
@@ -386,14 +415,14 @@ export function WorldCanvas({
   const useBloom = enableBloom && bloomSupported && !isSoftwareGl && qualityTier === 'high';
 
   useEffect(() => {
-    if (!webglSupported || contextLost) {
+    if (!webglSupported || contextLost || renderCrashed) {
       const raf = requestAnimationFrame(() => onSceneReady?.());
       return () => cancelAnimationFrame(raf);
     }
     return undefined;
-  }, [webglSupported, contextLost, onSceneReady]);
+  }, [webglSupported, contextLost, renderCrashed, onSceneReady]);
 
-  if (!webglSupported || contextLost) {
+  if (!webglSupported || contextLost || renderCrashed) {
     if (fallbackContent) {
       return <div className={`w-full h-full ${className}`}>{fallbackContent}</div>;
     }
@@ -415,52 +444,59 @@ export function WorldCanvas({
 
   return (
     <div className={`relative w-full h-full min-h-[240px] ${className}`}>
-      <Canvas
-        shadows={shadowsEnabled}
-        dpr={effectiveDpr}
-        camera={{ position: cameraPosition, fov, near: 0.25, far: 320 }}
-        gl={{
-          antialias: qualityTier !== 'lite',
-          powerPreference: 'high-performance',
-          toneMapping: THREE.ACESFilmicToneMapping,
-          toneMappingExposure: isDay ? 1.05 : 1.12,
-          outputColorSpace: THREE.SRGBColorSpace,
-        }}
-        onCreated={({ gl }) => {
-          const software = detectSoftwareWebGL(gl);
-          if (software) {
-            setIsSoftwareGl(true);
-          }
-
-          const canvas = gl.domElement;
-          const handleLost = (e: Event) => {
-            e.preventDefault();
-            setContextLost(true);
-            onWebGLFallback?.();
-          };
-          const handleRestored = () => setContextLost(false);
-          canvas.addEventListener('webglcontextlost', handleLost, false);
-          canvas.addEventListener('webglcontextrestored', handleRestored, false);
-          requestAnimationFrame(() => onSceneReady?.());
+      <WorldErrorBoundary
+        onError={() => {
+          setRenderCrashed(true);
+          onWebGLFallback?.();
         }}
       >
-        <WorldLabelContext.Provider value={labelRegistry}>
-          <EnvironmentLightingSetup
-            isDay={isDay}
-            fogDensityDay={fogDensityDay}
-            fogDensityNight={fogDensityNight}
-          />
-          <SkyAtmosphere isDay={isDay} reducedMotion={reducedMotion} />
-          <DayNightLightingRig isDay={isDay} shadowsEnabled={shadowsEnabled} />
-          {children}
-          {useBloom && (
-            <AdaptiveBloomComposer
+        <Canvas
+          shadows={shadowsEnabled}
+          dpr={effectiveDpr}
+          camera={{ position: cameraPosition, fov, near: 0.25, far: 320 }}
+          gl={{
+            antialias: qualityTier !== 'lite',
+            powerPreference: 'high-performance',
+            toneMapping: THREE.ACESFilmicToneMapping,
+            toneMappingExposure: isDay ? 1.05 : 1.12,
+            outputColorSpace: THREE.SRGBColorSpace,
+          }}
+          onCreated={({ gl }) => {
+            const software = detectSoftwareWebGL(gl);
+            if (software) {
+              setIsSoftwareGl(true);
+            }
+
+            const canvas = gl.domElement;
+            const handleLost = (e: Event) => {
+              e.preventDefault();
+              setContextLost(true);
+              onWebGLFallback?.();
+            };
+            const handleRestored = () => setContextLost(false);
+            canvas.addEventListener('webglcontextlost', handleLost, false);
+            canvas.addEventListener('webglcontextrestored', handleRestored, false);
+            requestAnimationFrame(() => onSceneReady?.());
+          }}
+        >
+          <WorldLabelContext.Provider value={labelRegistry}>
+            <EnvironmentLightingSetup
               isDay={isDay}
-              onUnsupported={() => setBloomSupported(false)}
+              fogDensityDay={fogDensityDay}
+              fogDensityNight={fogDensityNight}
             />
-          )}
-        </WorldLabelContext.Provider>
-      </Canvas>
+            <SkyAtmosphere isDay={isDay} reducedMotion={reducedMotion} />
+            <DayNightLightingRig isDay={isDay} shadowsEnabled={shadowsEnabled} />
+            {children}
+            {useBloom && (
+              <AdaptiveBloomComposer
+                isDay={isDay}
+                onUnsupported={() => setBloomSupported(false)}
+              />
+            )}
+          </WorldLabelContext.Provider>
+        </Canvas>
+      </WorldErrorBoundary>
       <WorldLabelOverlay registry={labelRegistry} />
     </div>
   );

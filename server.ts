@@ -54,7 +54,14 @@ import {
   saveVerifiedCredential,
 } from './server/vault.ts';
 import { decryptApiKey } from './server/crypto.ts';
-import { getProviderConfig, isValidProviderId, PROVIDER_IDS } from './src/shared/providers.ts';
+import { buildManagedSeatModelInfo } from './server/chatgptAlias.ts';
+import {
+  getProviderConfig,
+  isChatGptAliasModelId,
+  isManagedSeatModelId,
+  isValidProviderId,
+  PROVIDER_IDS,
+} from './src/shared/providers.ts';
 import {
   isAdminEmail,
   PREMIUM_PROVIDER_PRIORITY,
@@ -1041,6 +1048,8 @@ async function startServer() {
       await syncExistingAdminKeysFromAccount(req);
       const forceRefresh = req.query.refresh === '1';
       const isPremium = await getUserIsPremium(req);
+      const isAdmin = isAdminEmail(req.authUser!.email);
+      const shouldMask = isPremium && !isAdmin;
       const catalog = await getCatalogForUser(req.authUser!.uid, req.authUser!.idToken, {
         forceRefresh,
         isPremium,
@@ -1051,8 +1060,24 @@ async function startServer() {
         catalog.providerStates,
         { isPremium },
       );
+
+      const safeModels = shouldMask
+        ? catalog.models.map((m, idx) => {
+            if (m.provider === 'openai' && isChatGptAliasModelId(m.modelId)) {
+              return m;
+            }
+            const base = buildManagedSeatModelInfo(m.provider, `managed-${idx + 1}`);
+            return {
+              ...base,
+              available: m.available,
+              availabilityState: m.availabilityState,
+            };
+          })
+        : catalog.models;
+
       res.json({
         ...catalog,
+        models: safeModels,
         connections,
       });
     } catch (err) {
@@ -1072,6 +1097,7 @@ async function startServer() {
           probeUnverified?: boolean;
         };
         const isPremium = await getUserIsPremium(req);
+        const shouldMask = isPremium && !isAdminEmail(req.authUser!.email);
         const report = await runCouncilPreflight({
           uid: req.authUser!.uid,
           idToken: req.authUser!.idToken,
@@ -1081,6 +1107,21 @@ async function startServer() {
           probeUnverified: Boolean(probeUnverified),
           isPremium,
         });
+        if (shouldMask) {
+          res.json({
+            ...report,
+            readyModels: report.readyModels.map((m, idx) => {
+              if (m.provider === 'openai' && isChatGptAliasModelId(m.modelId)) return m;
+              if (isManagedSeatModelId(m.modelId)) return m;
+              return buildManagedSeatModelInfo(m.provider, `managed-${idx + 1}`);
+            }),
+            rejectedModels: report.rejectedModels.map((r) => ({
+              ...r,
+              modelId: isManagedSeatModelId(r.modelId) ? r.modelId : 'managed',
+            })),
+          });
+          return;
+        }
         res.json(report);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -1105,6 +1146,7 @@ async function startServer() {
             seatCount?: number;
           };
         const isPremium = await getUserIsPremium(req);
+        const isAdmin = isAdminEmail(req.authUser!.email);
         const cleanPrompt = typeof prompt === 'string' ? prompt.trim().slice(0, 4000) : '';
         const cleanMode: DiscussionMode =
           mode === 'chat' || mode === 'debate' ? mode : 'free';
@@ -1137,6 +1179,7 @@ async function startServer() {
               : undefined,
           seatCount: cleanSeats,
           isPremium,
+          maskAdminSharedModels: isPremium && !isAdmin,
         });
         res.json(selection);
       } catch (err) {
@@ -1236,6 +1279,7 @@ async function startServer() {
       }
 
       const isPremium = await getUserIsPremium(req);
+      const maskModelDetails = isPremium && !isAdminEmail(req.authUser!.email);
 
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -1256,6 +1300,7 @@ async function startServer() {
           mode: resolvedMode,
           intelligenceLevel: resolvedLevel,
           isPremium,
+          maskModelDetails,
           selectedModels,
           moderatorModel: moderatorModel || 'none',
           maxRounds: Number(maxRounds || 2),

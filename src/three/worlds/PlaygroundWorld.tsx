@@ -371,6 +371,7 @@ function CouncilEntrancePortal({
 }) {
   const outerRingRef = useRef<THREE.Mesh | null>(null);
   const innerRingRef = useRef<THREE.Mesh | null>(null);
+  const crownHaloRef = useRef<THREE.Mesh | null>(null);
   const keystoneRef = useRef<THREE.Mesh | null>(null);
   const portalLightRef = useRef<THREE.PointLight | null>(null);
 
@@ -401,6 +402,10 @@ function CouncilEntrancePortal({
     }
     if (innerRingRef.current) {
       innerRingRef.current.rotation.z -= delta * 0.72 * spinBoost;
+    }
+    if (crownHaloRef.current) {
+      crownHaloRef.current.rotation.z -= delta * (0.55 + targetCharge * 2.2);
+      crownHaloRef.current.position.y = 4.35 + Math.sin(t * 2.1) * 0.1 + targetCharge * 0.28;
     }
     if (keystoneRef.current) {
       keystoneRef.current.rotation.y += delta * (0.9 + targetCharge * 3.0);
@@ -494,7 +499,7 @@ function CouncilEntrancePortal({
         />
       </mesh>
 
-      {/* Levitating Faceted Keystone Crystal */}
+      {/* Levitating Faceted Keystone Crystal + Crown Halo */}
       <mesh ref={keystoneRef} position={[0, 4.35, 0]} castShadow>
         <octahedronGeometry args={[0.34, 0]} />
         <meshStandardMaterial
@@ -503,6 +508,14 @@ function CouncilEntrancePortal({
           emissiveIntensity={1.5 + holdProgress * 2.5}
           roughness={0.15}
           metalness={0.3}
+        />
+      </mesh>
+      <mesh ref={crownHaloRef} rotation={[Math.PI / 2.2, 0, 0]} position={[0, 4.35, 0]}>
+        <torusGeometry args={[0.62, 0.024, 8, 32]} />
+        <meshStandardMaterial
+          color="#38bdf8"
+          emissive="#818cf8"
+          emissiveIntensity={1.3 + holdProgress * 2.2}
         />
       </mesh>
 

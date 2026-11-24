@@ -41,6 +41,53 @@ const TMP_QUAT = new THREE.Quaternion();
 const UP_VEC = new THREE.Vector3(0, 1, 0);
 const MAT_LOOK = new THREE.Matrix4();
 
+function applyRigStatus(
+  rig: ArticulatedCharacterRig,
+  status: CharacterOperationalStatus,
+  kind: 'nova' | ProviderId,
+) {
+  const { eyeGlow, accentGlow, statusRing } = rig.materials;
+  if (status === 'disconnected') {
+    eyeGlow.emissiveIntensity = 0.08;
+    accentGlow.emissiveIntensity = 0.1;
+    statusRing.color.set('#475569');
+    statusRing.opacity = 0.18;
+  } else if (status === 'error') {
+    eyeGlow.emissive.set('#fb7185');
+    eyeGlow.emissiveIntensity = 1.6;
+    accentGlow.emissive.set('#f43f5e');
+    accentGlow.emissiveIntensity = 1.4;
+    statusRing.color.set('#f43f5e');
+    statusRing.opacity = 0.45;
+  } else if (status === 'warning') {
+    eyeGlow.emissive.set('#fbbf24');
+    eyeGlow.emissiveIntensity = 1.6;
+    accentGlow.emissive.set('#f59e0b');
+    accentGlow.emissiveIntensity = 1.3;
+    statusRing.color.set('#f59e0b');
+    statusRing.opacity = 0.42;
+  } else if (status === 'connecting') {
+    eyeGlow.emissive.set('#38bdf8');
+    eyeGlow.emissiveIntensity = 2.0;
+    statusRing.color.set('#38bdf8');
+    statusRing.opacity = 0.48;
+  } else {
+    if (kind === 'nova') {
+      eyeGlow.emissive.set('#38bdf8');
+      accentGlow.emissive.set('#7c3aed');
+      statusRing.color.set('#38bdf8');
+    } else {
+      const c = eyeGlow.color.getHex();
+      eyeGlow.emissive.setHex(c);
+      accentGlow.emissive.setHex(c);
+      statusRing.color.setHex(c);
+    }
+    eyeGlow.emissiveIntensity = 2.1;
+    accentGlow.emissiveIntensity = 1.45;
+    statusRing.opacity = 0.36;
+  }
+}
+
 export function CharacterActor({
   id,
   label,
@@ -60,14 +107,29 @@ export function CharacterActor({
 }: CharacterActorProps) {
   const [hovered, setHovered] = useState(false);
 
-  const rig = useMemo<ArticulatedCharacterRig>(() => {
-    return kind === 'nova' ? createNovaCharacterRig() : createProviderCharacterRig(kind);
-  }, [kind]);
-
   const clips = useMemo(() => getCharacterAnimationClips(), []);
-  const mixer = useMemo(() => new THREE.AnimationMixer(rig.root), [rig]);
-  const actions = useMemo(() => {
-    const map: Record<CharacterAnimState, THREE.AnimationAction> = {
+  const rigContainerRef = useRef<THREE.Group | null>(null);
+  const rigRef = useRef<ArticulatedCharacterRig | null>(null);
+  const mixerRef = useRef<THREE.AnimationMixer | null>(null);
+  const actionsRef = useRef<Record<CharacterAnimState, THREE.AnimationAction> | null>(null);
+
+  const activeStateRef = useRef<CharacterAnimState>('idle');
+  const labelGroupRef = useRef<THREE.Group | null>(null);
+  const waypointIndexRef = useRef(0);
+  const pauseTimerRef = useRef(1.2 + gatherDelaySec * 1.7);
+  const gatherElapsedRef = useRef(0);
+  const enteredNotifiedRef = useRef(false);
+  const interactBoostRef = useRef(0);
+
+  // Build rig + mixer cleanly inside useEffect so React 19 StrictMode remounts
+  // always construct a fresh, non-disposed GPU rig and AnimationMixer.
+  useEffect(() => {
+    const container = rigContainerRef.current;
+    if (!container) return undefined;
+
+    const rig = kind === 'nova' ? createNovaCharacterRig() : createProviderCharacterRig(kind);
+    const mixer = new THREE.AnimationMixer(rig.root);
+    const actions: Record<CharacterAnimState, THREE.AnimationAction> = {
       idle: mixer.clipAction(clips.idle),
       walk: mixer.clipAction(clips.walk),
       turn: mixer.clipAction(clips.turn),
@@ -76,98 +138,64 @@ export function CharacterActor({
       enterPortal: mixer.clipAction(clips.enterPortal),
       dormant: mixer.clipAction(clips.dormant),
     };
-    map.enterPortal.setLoop(THREE.LoopOnce, 1);
-    map.enterPortal.clampWhenFinished = true;
-    map.interact.setLoop(THREE.LoopOnce, 1);
-    return map;
-  }, [mixer, clips]);
+    actions.enterPortal.setLoop(THREE.LoopOnce, 1);
+    actions.enterPortal.clampWhenFinished = true;
+    actions.interact.setLoop(THREE.LoopOnce, 1);
 
-  const activeStateRef = useRef<CharacterAnimState>('idle');
-  const labelGroupRef = useRef<THREE.Group | null>(null);
-  const waypointIndexRef = useRef(0);
-  const pauseTimerRef = useRef(1.2 + (gatherDelaySec * 1.7));
-  const gatherElapsedRef = useRef(0);
-  const enteredNotifiedRef = useRef(false);
-  const interactBoostRef = useRef(0);
-
-  // Initialize home position once when rig mounts
-  useEffect(() => {
     rig.root.position.set(homePosition[0], homePosition[1], homePosition[2]);
+    const angle = Math.atan2(-homePosition[0], -homePosition[2]);
+    rig.root.rotation.set(0, angle, 0);
+    applyRigStatus(rig, status, kind);
+
     if (labelGroupRef.current) {
       labelGroupRef.current.position.copy(rig.root.position);
     }
-    // Face center plaza by default
-    const angle = Math.atan2(-homePosition[0], -homePosition[2]);
-    rig.root.rotation.set(0, angle, 0);
+
     actions.idle.reset().play();
     activeStateRef.current = 'idle';
 
+    container.add(rig.root);
+    rigRef.current = rig;
+    mixerRef.current = mixer;
+    actionsRef.current = actions;
+
     return () => {
       mixer.stopAllAction();
+      mixer.uncacheRoot(rig.root);
+      container.remove(rig.root);
       rig.materials.disposables.forEach((d) => d.dispose());
+      if (rigRef.current === rig) {
+        rigRef.current = null;
+        mixerRef.current = null;
+        actionsRef.current = null;
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rig, mixer, actions]);
+  }, [kind, clips]);
 
   // Reset gathering flags when returning to idle
   useEffect(() => {
-    if (gatheringPhase === 'idle') {
+    const rig = rigRef.current;
+    if (gatheringPhase === 'idle' && rig) {
       gatherElapsedRef.current = 0;
       enteredNotifiedRef.current = false;
       rig.root.scale.setScalar(1);
       rig.root.visible = true;
     }
-  }, [gatheringPhase, rig]);
+  }, [gatheringPhase]);
 
   // Status-based emissive & ring coloring
   useEffect(() => {
-    const { eyeGlow, accentGlow, statusRing } = rig.materials;
-    if (status === 'disconnected') {
-      eyeGlow.emissiveIntensity = 0.08;
-      accentGlow.emissiveIntensity = 0.1;
-      statusRing.color.set('#475569');
-      statusRing.opacity = 0.18;
-    } else if (status === 'error') {
-      eyeGlow.emissive.set('#fb7185');
-      eyeGlow.emissiveIntensity = 1.6;
-      accentGlow.emissive.set('#f43f5e');
-      accentGlow.emissiveIntensity = 1.4;
-      statusRing.color.set('#f43f5e');
-      statusRing.opacity = 0.45;
-    } else if (status === 'warning') {
-      eyeGlow.emissive.set('#fbbf24');
-      eyeGlow.emissiveIntensity = 1.6;
-      accentGlow.emissive.set('#f59e0b');
-      accentGlow.emissiveIntensity = 1.3;
-      statusRing.color.set('#f59e0b');
-      statusRing.opacity = 0.42;
-    } else if (status === 'connecting') {
-      eyeGlow.emissive.set('#38bdf8');
-      eyeGlow.emissiveIntensity = 2.0;
-      statusRing.color.set('#38bdf8');
-      statusRing.opacity = 0.48;
-    } else {
-      // Restore healthy glow
-      if (kind === 'nova') {
-        eyeGlow.emissive.set('#38bdf8');
-        accentGlow.emissive.set('#7c3aed');
-        statusRing.color.set('#38bdf8');
-      } else {
-        const c = eyeGlow.color.getHex();
-        eyeGlow.emissive.setHex(c);
-        accentGlow.emissive.setHex(c);
-        statusRing.color.setHex(c);
-      }
-      eyeGlow.emissiveIntensity = 2.1;
-      accentGlow.emissiveIntensity = 1.45;
-      statusRing.opacity = 0.36;
-    }
-  }, [status, rig, kind]);
+    if (!rigRef.current) return;
+    applyRigStatus(rigRef.current, status, kind);
+  }, [status, kind]);
 
   const switchAnim = (next: CharacterAnimState, fadeSec = 0.28) => {
-    if (activeStateRef.current === next) return;
+    const actions = actionsRef.current;
+    if (!actions || activeStateRef.current === next) return;
     const prevAction = actions[activeStateRef.current];
     const nextAction = actions[next];
+    if (!prevAction || !nextAction) return;
     nextAction.reset();
     nextAction.enabled = true;
     nextAction.setEffectiveWeight(1);
@@ -177,6 +205,10 @@ export function CharacterActor({
   };
 
   useFrame((state, delta) => {
+    const rig = rigRef.current;
+    const mixer = mixerRef.current;
+    if (!rig || !mixer) return;
+
     const dt = Math.min(delta, 0.05);
     mixer.update(reducedMotion ? dt * 0.25 : dt);
     if (labelGroupRef.current) {
@@ -196,7 +228,6 @@ export function CharacterActor({
     // 2. Gathering sequence when Portal activated
     if (gatheringPhase === 'gathering' || gatheringPhase === 'entered') {
       if (kind === 'nova') {
-        // Nova stands beside portal steps and beckons everyone in, then enters last
         TMP_TARGET.set(-1.35, 0.24, -3.55);
         const dist = rig.root.position.distanceTo(TMP_TARGET);
         if (dist > 0.16) {
@@ -270,7 +301,7 @@ export function CharacterActor({
       return;
     }
 
-    // 3. Charging sequence (Press & Hold anticipation): AI characters turn toward portal attentively
+    // 3. Charging sequence (Press & Hold anticipation)
     if (gatheringPhase === 'charging' && holdProgress > 0.05) {
       if (isOperational || kind === 'nova') {
         switchAnim(holdProgress > 0.55 ? 'beckon' : 'turn', 0.24);
@@ -290,7 +321,6 @@ export function CharacterActor({
       return;
     }
 
-    // Error / Warning pulse modulation
     if (status === 'error') {
       rig.materials.eyeGlow.emissiveIntensity =
         1.1 + Math.sin(state.clock.elapsedTime * 7.0) * 0.6;
@@ -315,7 +345,6 @@ export function CharacterActor({
         rig.root.quaternion.slerp(TMP_QUAT, dt * 4.5);
       } else {
         switchAnim('idle', 0.35);
-        // Face center slightly while idling
         TMP_TARGET.set(0, rig.root.position.y, -1.0);
         MAT_LOOK.lookAt(TMP_TARGET, rig.root.position, UP_VEC);
         TMP_QUAT.setFromRotationMatrix(MAT_LOOK);
@@ -351,7 +380,7 @@ export function CharacterActor({
         document.body.style.cursor = 'default';
       }}
     >
-      <primitive object={rig.root} />
+      <group ref={rigContainerRef} />
 
       <group ref={labelGroupRef}>
         {showLabels && gatheringPhase !== 'entered' && (

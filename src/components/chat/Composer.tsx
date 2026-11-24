@@ -10,7 +10,12 @@ import {
   Zap,
 } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
-import { isValidProviderId } from '../../shared/providers';
+import {
+  formatParticipantDisplayLabel,
+  isChatGptAliasModelId,
+  isManagedSeatModelId,
+  isValidProviderId,
+} from '../../shared/providers';
 import type { ProviderId, ReplyToRef } from '../../shared/types';
 import {
   getDuplicateProviderCompositeSet,
@@ -147,6 +152,7 @@ export const Composer = memo(function Composer({
   onForceSendQueued,
   onStop,
   onRunModeratorVerdict,
+  hideModelDetails = false,
 }: {
   councilId?: string;
   selectedModels?: string[];
@@ -165,6 +171,7 @@ export const Composer = memo(function Composer({
   onForceSendQueued?: () => void;
   onStop: () => void;
   onRunModeratorVerdict: () => void;
+  hideModelDetails?: boolean;
 }) {
   const prefersReduced = Boolean(useReducedMotion());
   const [draft, setDraft] = useState(() => readStoredDraft(councilId));
@@ -299,8 +306,11 @@ export const Composer = memo(function Composer({
   const applyMention = useCallback(
     (opt: MentionModelOption) => {
       if (!mentionMatch) return;
-      const handle = opt.modelId.split('/').pop()?.split(':')[0] || opt.shortName;
-      const insertion = `@${handle} `;
+      const cleanHandle =
+        hideModelDetails || isManagedSeatModelId(opt.modelId)
+          ? (isChatGptAliasModelId(opt.modelId) ? 'ChatGPT' : opt.shortName).replace(/\s+/g, '')
+          : opt.modelId.split('/').pop()?.split(':')[0] || opt.shortName;
+      const insertion = `@${cleanHandle} `;
       const next =
         draft.slice(0, mentionMatch.start) + insertion + draft.slice(mentionMatch.end);
       setDraft(next);
@@ -319,7 +329,7 @@ export const Composer = memo(function Composer({
         });
       }
     },
-    [draft, mentionMatch, scheduleResize],
+    [draft, hideModelDetails, mentionMatch, scheduleResize],
   );
 
   const triggerMentionButton = useCallback(() => {
@@ -386,9 +396,22 @@ export const Composer = memo(function Composer({
     ? replyTarget.role === 'user' || replyTarget.provider === 'user'
       ? 'You'
       : replyTarget.role === 'moderator'
-        ? `${replyVisual?.shortName || 'Council'} Moderator`
-        : replyVisual?.shortName || replyTarget.modelLabel
+        ? `${formatParticipantDisplayLabel({
+            provider: replyTarget.provider,
+            modelId: replyTarget.modelId,
+            modelLabel: replyTarget.modelLabel,
+            hideModelDetails,
+          })} Moderator`
+        : formatParticipantDisplayLabel({
+            provider: replyTarget.provider,
+            modelId: replyTarget.modelId,
+            modelLabel: replyTarget.modelLabel,
+            hideModelDetails,
+          })
     : '';
+  const hideReplyModelId = Boolean(
+    replyTarget && (hideModelDetails || isManagedSeatModelId(replyTarget.modelId)),
+  );
 
   return (
     <footer className="w-full shrink-0 border-t border-white/[0.08] bg-[#0B1123]/96 px-3 sm:px-5 pt-2 pb-[max(0.55rem,env(safe-area-inset-bottom))]">
@@ -411,6 +434,13 @@ export const Composer = memo(function Composer({
               </div>
               {filteredMentions.map((opt, idx) => {
                 const active = idx === mentionIndex;
+                const maskOpt = hideModelDetails || isManagedSeatModelId(opt.modelId);
+                const optDisplayName = isChatGptAliasModelId(opt.modelId)
+                  ? 'ChatGPT'
+                  : opt.shortName;
+                const optHandle = maskOpt
+                  ? optDisplayName.replace(/\s+/g, '')
+                  : opt.modelId.split('/').pop()?.split(':')[0] || optDisplayName;
                 return (
                   <button
                     key={opt.compositeId}
@@ -439,14 +469,16 @@ export const Composer = memo(function Composer({
                         className="font-display text-xs font-semibold shrink-0"
                         style={{ color: opt.accentHex }}
                       >
-                        {opt.shortName}
+                        {optDisplayName}
                       </span>
-                      <span className="font-mono text-[11px] text-[#9AA7BF] truncate">
-                        {opt.modelId}
-                      </span>
+                      {!maskOpt && (
+                        <span className="font-mono text-[11px] text-[#9AA7BF] truncate">
+                          {opt.modelId}
+                        </span>
+                      )}
                     </div>
                     <span className="text-[10.5px] font-mono text-[#7AA7FF] shrink-0">
-                      @{opt.modelId.split('/').pop()?.split(':')[0]}
+                      @{optHandle}
                     </span>
                   </button>
                 );
@@ -536,7 +568,7 @@ export const Composer = memo(function Composer({
                     >
                       {replySenderName}
                     </span>
-                    {replyTarget.role !== 'user' && replyTarget.modelId && (
+                    {replyTarget.role !== 'user' && replyTarget.modelId && !hideReplyModelId && (
                       <span className="hidden sm:inline font-mono text-[10.5px] text-[#8E9BB3] truncate max-w-[180px]">
                         {replyTarget.modelId}
                       </span>

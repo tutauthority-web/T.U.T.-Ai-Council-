@@ -8,7 +8,13 @@ import {
   Square,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { isValidProviderId, PROVIDER_REGISTRY } from '../../shared/providers';
+import {
+  formatParticipantDisplayLabel,
+  isChatGptAliasModelId,
+  isManagedSeatModelId,
+  isValidProviderId,
+  PROVIDER_REGISTRY,
+} from '../../shared/providers';
 import type { CouncilRoomDoc, ProviderId } from '../../shared/types';
 import { AppShellMobileMenuButton } from '../AppShell';
 import {
@@ -52,6 +58,7 @@ export function ChatHeader({
   onStop,
   onExportMarkdown,
   onExportJSON,
+  hideModelDetails = false,
 }: {
   council: CouncilRoomDoc;
   modeLabel: string;
@@ -66,6 +73,7 @@ export function ChatHeader({
   onStop: () => void;
   onExportMarkdown: () => void;
   onExportJSON: () => void;
+  hideModelDetails?: boolean;
 }) {
   const [modelsExpanded, setModelsExpanded] = useState(false);
 
@@ -137,7 +145,10 @@ export function ChatHeader({
                   {isRunning && <span aria-hidden="true">·</span>}
                   <span>{modeLabel}</span>
                   <span aria-hidden="true">·</span>
-                  <span>{council.selectedModels.length} models</span>
+                  <span>
+                    {council.selectedModels.length}{' '}
+                    {hideModelDetails ? 'seats' : 'models'}
+                  </span>
                   {!isChatMode && council.moderatorModel !== 'none' && (
                     <span className="hidden md:inline-flex items-center gap-1 text-amber-200/80 ml-1">
                       · <Scale className="w-3 h-3 text-amber-300" /> Moderator
@@ -235,7 +246,9 @@ export function ChatHeader({
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#9AA7BF]">
                   <span>
                     Participants ({council.selectedModels.length})
-                    {council.intelligenceLevel ? ` · ${council.intelligenceLevel} intelligence` : ''}
+                    {!hideModelDetails && council.intelligenceLevel
+                      ? ` · ${council.intelligenceLevel} intelligence`
+                      : ''}
                   </span>
                   <span className="tabular-nums">
                     {totalTokens.toLocaleString()} tokens
@@ -243,10 +256,12 @@ export function ChatHeader({
                   </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                  {council.selectedModels.map((compositeId) => {
+                  {council.selectedModels.map((compositeId, seatIdx) => {
                     const fb = activeFallbacksByOriginal.get(compositeId);
                     const activeId = fb ? fb.fallbackCompositeId : compositeId;
                     const parsedActive = formatCompositeDisplay(activeId);
+                    const isChatGpt = isChatGptAliasModelId(parsedActive.modelId);
+                    const shouldHideModel = hideModelDetails || isManagedSeatModelId(parsedActive.modelId);
                     const visual = getModelVisualIdentity(
                       parsedActive.providerId,
                       parsedActive.modelId,
@@ -255,10 +270,13 @@ export function ChatHeader({
                     const isReady = preflightState
                       ? preflightState.readyModels.includes(activeId) || Boolean(fb)
                       : false;
+                    const providerHeading = isChatGpt
+                      ? 'ChatGPT'
+                      : parsedActive.providerName;
 
                     return (
                       <div
-                        key={compositeId}
+                        key={`${compositeId}-${seatIdx}`}
                         className="rounded-xl bg-[#0A0F1E]/75 border border-white/10 px-3 py-2 text-xs space-y-0.5"
                       >
                         <div className="flex items-center justify-between gap-2">
@@ -268,7 +286,7 @@ export function ChatHeader({
                               style={{ backgroundColor: visual.accentHex }}
                             />
                             <span style={{ color: visual.accentHex }}>
-                              {parsedActive.providerName}
+                              {providerHeading}
                             </span>
                           </span>
                           {fb ? (
@@ -277,8 +295,19 @@ export function ChatHeader({
                             <span className="text-emerald-400 font-medium">Verified</span>
                           ) : null}
                         </div>
-                        <p className="font-mono text-[#E6EBF5] truncate">{parsedActive.modelId}</p>
-                        {fb && (
+                        {shouldHideModel ? (
+                          <p className="text-[#CBD5E1] truncate text-[11.5px]">
+                            {formatParticipantDisplayLabel({
+                              provider: parsedActive.providerId,
+                              modelId: parsedActive.modelId,
+                              hideModelDetails: true,
+                              seatLabel: `Seat ${seatIdx + 1}`,
+                            })}
+                          </p>
+                        ) : (
+                          <p className="font-mono text-[#E6EBF5] truncate">{parsedActive.modelId}</p>
+                        )}
+                        {fb && !shouldHideModel && (
                           <p className="text-[#9AA7BF] truncate text-[11px]">
                             Replaced: <span className="font-mono">{fb.originalCompositeId}</span>
                           </p>

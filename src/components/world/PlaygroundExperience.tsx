@@ -219,6 +219,8 @@ export function PlaygroundExperience({
     };
   }, [selectedCharacterId, operationalProviders.length, providerPresence]);
 
+  const hideModelDetails = isPremium && !isAdmin;
+
   const novaSubtitle = useMemo(() => {
     if (gatheringPhase === 'gathering' || gatheringPhase === 'entered') {
       return 'Portal open · Gathering your AI Council...';
@@ -232,6 +234,9 @@ export function PlaygroundExperience({
     if (connectionsLoading) {
       return 'Nova is syncing live provider connections...';
     }
+    if (hideModelDetails) {
+      return `Nova says Premium Cloud is active · ${operationalProviders.length} providers ready`;
+    }
     if (operationalProviders.length > 0) {
       return `Nova says ${operationalProviders.length} AI ${
         operationalProviders.length === 1 ? 'provider is' : 'providers are'
@@ -242,6 +247,7 @@ export function PlaygroundExperience({
     gatheringPhase,
     isAuthenticated,
     connectionsLoading,
+    hideModelDetails,
     operationalProviders.length,
     usableModelsCount,
   ]);
@@ -250,8 +256,8 @@ export function PlaygroundExperience({
   const holdDashOffset = holdCircumference * (1 - holdProgress);
 
   const hudSurfaceClass = isDay
-    ? 'bg-white/88 border-slate-300/80 text-slate-900 shadow-lg'
-    : 'bg-[#090E1A]/86 border-slate-700/75 text-slate-100 shadow-xl';
+    ? 'bg-white/88 backdrop-blur-md border-slate-300/80 text-slate-900 shadow-lg'
+    : 'bg-[#090E1A]/86 backdrop-blur-md border-slate-700/75 text-slate-100 shadow-xl';
 
   const fallback2D = (
     <div
@@ -428,7 +434,7 @@ export function PlaygroundExperience({
       {/* Selected Character Mini Tooltip Card */}
       {!hudHidden && selectedCharacterInfo && gatheringPhase === 'idle' && (
         <div
-          className={`pointer-events-auto absolute top-20 left-3 sm:left-5 z-20 max-w-xs rounded-xl border p-3.5 ${hudSurfaceClass}`}
+          className={`pointer-events-auto animate-panel-enter absolute top-20 left-3 sm:left-5 z-20 max-w-xs rounded-xl border p-3.5 ${hudSurfaceClass}`}
         >
           <div className="flex items-start justify-between gap-2">
             <div>
@@ -572,9 +578,15 @@ export function PlaygroundExperience({
                 </p>
               </div>
               <div className="bg-[#111827] border border-slate-800 rounded-xl p-3.5">
-                <p className="text-[11px] text-slate-400">Ready Models</p>
+                <p className="text-[11px] text-slate-400">
+                  {hideModelDetails ? 'Cloud Access' : 'Ready Models'}
+                </p>
                 <p className="font-display text-xl font-bold mt-1 tabular-nums">
-                  {connectionsLoading ? '—' : usableModelsCount}
+                  {connectionsLoading
+                    ? '—'
+                    : hideModelDetails
+                      ? 'Auto Pool'
+                      : usableModelsCount}
                 </p>
               </div>
               <div className="bg-[#111827] border border-slate-800 rounded-xl p-3.5">
@@ -643,7 +655,7 @@ export function PlaygroundExperience({
                   onClick={() => onNavigate('history')}
                   className="text-xs text-blue-400 hover:text-blue-300"
                 >
-                  All History
+                  Chat History
                 </button>
               </div>
               {activeCouncils.length === 0 ? (

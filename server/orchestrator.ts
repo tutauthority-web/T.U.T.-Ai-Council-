@@ -1,7 +1,9 @@
 import crypto from 'node:crypto';
 import {
   getProviderConfig,
+  isChatGptAliasModelId,
   isFreeRateLimitedProvider,
+  isManagedSeatModelId,
   isValidProviderId,
   PROVIDER_IDS,
   PROVIDER_REGISTRY,
@@ -21,6 +23,7 @@ import {
   type ReplyToRef,
   type RunMessageInput,
 } from '../src/shared/types.ts';
+import { resolveChatGptAliasGeminiModelId } from './chatgptAlias.ts';
 import { getCatalogForUser, probeSingleModel } from './modelCatalogService.ts';
 import {
   classifyProviderError,
@@ -43,7 +46,7 @@ import {
   completeShortOpenAIPrompt,
   streamOpenAIResponse,
 } from './providers/openai.ts';
-import { rankFallbackCandidates } from './smartSelect.ts';
+import { rankFallbackCandidates, scoreModelForSelection } from './smartSelect.ts';
 import { resolveRuntimeApiKey } from './vault.ts';
 
 export const DEFAULT_COUNCIL_TURN_DELAY_MS = 1500;
@@ -93,7 +96,10 @@ export function stopCouncilRun(uid: string, councilId: string): boolean {
   return true;
 }
 
-export function parseCompositeModel(compositeId: string): {
+export function parseCompositeModel(
+  compositeId: string,
+  options?: { maskModelDetails?: boolean; seatTag?: string },
+): {
   provider: ProviderId;
   modelId: string;
   label: string;
@@ -102,14 +108,32 @@ export function parseCompositeModel(compositeId: string): {
   if (idx === -1) {
     return {
       provider: 'google',
-      modelId: compositeId,
-      label: `Google Gemini · ${compositeId}`,
+      modelId: options?.maskModelDetails ? 'managed' : compositeId,
+      label: options?.maskModelDetails
+        ? options?.seatTag
+          ? `Google Gemini · ${options.seatTag}`
+          : 'Google Gemini'
+        : `Google Gemini · ${compositeId}`,
     };
   }
   const raw = compositeId.slice(0, idx);
   const provider: ProviderId = isValidProviderId(raw) ? raw : 'google';
   const modelId = compositeId.slice(idx + 1);
+  if (provider === 'openai' && isChatGptAliasModelId(modelId)) {
+    return {
+      provider,
+      modelId,
+      label: options?.seatTag ? `ChatGPT · ${options.seatTag}` : 'ChatGPT',
+    };
+  }
   const providerName = PROVIDER_REGISTRY[provider]?.name || raw;
+  if (options?.maskModelDetails || isManagedSeatModelId(modelId)) {
+    return {
+      provider,
+      modelId: isManagedSeatModelId(modelId) ? modelId : 'managed',
+      label: options?.seatTag ? `${providerName} · ${options.seatTag}` : providerName,
+    };
+  }
   return {
     provider,
     modelId,
@@ -427,6 +451,7 @@ export async function runCouncilEngine(params: {
   intelligenceLevel?: IntelligenceLevel;
   enableFallback?: boolean;
   isPremium?: boolean;
+  maskModelDetails?: boolean;
   selectedModels: string[];
   moderatorModel: string;
   maxRounds: number;
@@ -600,11 +625,85 @@ export async function runCouncilEngine(params: {
     const readySet = new Set(preflight.readyModels.map((m) => m.compositeId));
     const rejectedMap = new Map(preflight.rejectedModels.map((r) => [r.compositeId, r]));
 
+    // Resolve actual execution targets for ChatGPT aliases (-> Gemini Flash Lite) and managed-* seats
+    const resolvedExecMap = new Map<string, { execProvider: ProviderId; execModelId: string }>();
+    const seatTagMap = new Map<string, string>();
+    const providerGroupCounters = new Map<ProviderId, number>();
+    const providerGroupTotals = new Map<ProviderId, number>();
+    for (const cid of params.selectedModels) {
+      const p = parseCompositeModel(cid).provider;
+      providerGroupTotals.set(p, (providerGroupTotals.get(p) || 0) + 1);
+    }
+    for (const cid of params.selectedModels) {
+      const p = parseCompositeModel(cid).provider;
+      if ((providerGroupTotals.get(p) || 0) > 1) {
+        const nextIdx = (providerGroupCounters.get(p) || 0) + 1;
+        providerGroupCounters.set(p, nextIdx);
+        seatTagMap.set(cid, `Seat ${nextIdx}`);
+      }
+    }
+
+    const needManagedOrAlias = targetsToVerify.some((cid) => {
+      const parsed = parseCompositeModel(cid);
+      return (
+        (parsed.provider === 'openai' && isChatGptAliasModelId(parsed.modelId)) ||
+        isManagedSeatModelId(parsed.modelId)
+      );
+    });
+    if (needManagedOrAlias) {
+      const pool = await getCatalogAvailable();
+      const googleModels = pool.filter((m) => m.provider === 'google');
+      const googleKey = keyMap.get('google') || null;
+      const usedRealByProvider = new Map<ProviderId, Set<string>>();
+
+      for (const cid of targetsToVerify) {
+        const parsed = parseCompositeModel(cid);
+        if (parsed.provider === 'openai' && isChatGptAliasModelId(parsed.modelId) && googleKey) {
+          const flashLiteId = await resolveChatGptAliasGeminiModelId(
+            params.uid,
+            googleKey,
+            googleModels,
+          );
+          resolvedExecMap.set(cid, {
+            execProvider: 'google',
+            execModelId: flashLiteId,
+          });
+        } else if (isManagedSeatModelId(parsed.modelId)) {
+          const candidates = pool
+            .filter((m) => m.provider === parsed.provider)
+            .sort(
+              (a, b) =>
+                scoreModelForSelection(b, params.userPrompt, params.mode, intelligenceLevel) -
+                scoreModelForSelection(a, params.userPrompt, params.mode, intelligenceLevel),
+            );
+          const used = usedRealByProvider.get(parsed.provider) || new Set<string>();
+          let chosen = candidates.find((c) => !used.has(c.modelId)) || candidates[0];
+          if (chosen) {
+            used.add(chosen.modelId);
+            usedRealByProvider.set(parsed.provider, used);
+            resolvedExecMap.set(cid, {
+              execProvider: chosen.provider,
+              execModelId: chosen.modelId,
+            });
+          }
+        }
+      }
+    }
+
+    let fallbackCounter = 0;
+
     params.emit({
       type: 'preflight_summary',
       readyModels: Array.from(readySet),
-      rejectedModels: preflight.rejectedModels,
-      warnings: preflight.warnings,
+      rejectedModels: preflight.rejectedModels.map((r) =>
+        params.maskModelDetails
+          ? {
+              ...r,
+              modelId: isManagedSeatModelId(r.modelId) ? r.modelId : 'managed',
+            }
+          : r,
+      ),
+      warnings: params.maskModelDetails ? [] : preflight.warnings,
     });
 
     const effectiveModels: string[] = [];
@@ -792,13 +891,20 @@ export async function runCouncilEngine(params: {
       errorCategory?: ErrorCategory | 'disconnected';
       errorSummary?: string;
     }> => {
-      const { provider, modelId, label } = parseCompositeModel(opts.compositeId);
+      const seatTag = seatTagMap.get(opts.compositeId);
+      const { provider, modelId, label } = parseCompositeModel(opts.compositeId, {
+        maskModelDetails: params.maskModelDetails,
+        seatTag,
+      });
+      const resolvedExec = resolvedExecMap.get(opts.compositeId);
+      const execProvider: ProviderId = resolvedExec?.execProvider || provider;
+      const execModelId: string = resolvedExec?.execModelId || modelId;
       const messageId = `msg_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
-      const apiKey = keyMap.get(provider) || null;
+      const apiKey = keyMap.get(execProvider) || null;
 
       if (!apiKey) {
         failedTurnCount += 1;
-        const summary = `Provider "${provider}" is not connected.`;
+        const summary = `Provider "${PROVIDER_REGISTRY[provider]?.name || provider}" is not connected.`;
         params.emit({
           type: 'model_error',
           messageId,
@@ -815,9 +921,9 @@ export async function runCouncilEngine(params: {
         return { entry: null, errorCategory: 'disconnected', errorSummary: summary };
       }
 
-      const preHealth = getProviderHealth(params.uid, provider);
+      const preHealth = getProviderHealth(params.uid, execProvider);
       if (
-        !isFreeRateLimitedProvider(provider) &&
+        !isFreeRateLimitedProvider(execProvider) &&
         (preHealth.state === 'insufficient_credits' ||
           preHealth.state === 'invalid_credentials' ||
           preHealth.state === 'unavailable')
@@ -825,7 +931,7 @@ export async function runCouncilEngine(params: {
         failedTurnCount += 1;
         const summary =
           preHealth.message ||
-          `Provider "${provider}" is temporarily paused (${preHealth.state}) for up to 5 minutes.`;
+          `Provider "${PROVIDER_REGISTRY[provider]?.name || provider}" is temporarily unavailable.`;
         params.emit({
           type: 'model_error',
           messageId,
@@ -1015,8 +1121,8 @@ export async function runCouncilEngine(params: {
         try {
           const result = await invokeStreamFn({
             apiKey,
-            provider,
-            modelId,
+            provider: execProvider,
+            modelId: execModelId,
             systemInstruction: opts.systemInstruction,
             prompt: activePrompt,
             signal: controller.signal,
@@ -1072,7 +1178,7 @@ export async function runCouncilEngine(params: {
 
           // Mark this model inference-verified upon its first successful chat execution
           if (validTurn) {
-            recordModelAccessVerified(params.uid, provider, opts.compositeId);
+            recordModelAccessVerified(params.uid, execProvider, `${execProvider}:${execModelId}`);
             completedTurnCount += 1;
           }
 
@@ -1108,13 +1214,13 @@ export async function runCouncilEngine(params: {
             opts.handleMap &&
             opts.handleMap.size > 0 &&
             opts.lastHandle &&
-            !reactionEvalBlockedProviders.has(provider)
+            !reactionEvalBlockedProviders.has(execProvider)
           ) {
             try {
               const evalDecision = await evaluateReactionFn({
                 apiKey,
-                provider,
-                modelId,
+                provider: execProvider,
+                modelId: execModelId,
                 modelLabel: label,
                 contextText: opts.prompt,
                 ownReply: finalContent,
@@ -1129,9 +1235,9 @@ export async function runCouncilEngine(params: {
                 });
               }
             } catch (evalErr) {
-              const classifiedEval = classifyProviderError(evalErr, provider, apiKey);
+              const classifiedEval = classifyProviderError(evalErr, execProvider, apiKey);
               if (classifiedEval.category === 'rate_limited' || classifiedEval.category === 'insufficient_credits') {
-                reactionEvalBlockedProviders.add(provider);
+                reactionEvalBlockedProviders.add(execProvider);
               }
             }
           }
@@ -1154,7 +1260,7 @@ export async function runCouncilEngine(params: {
         } catch (err) {
           lastErr = err;
           if (controller.signal.aborted) break;
-          const classified = classifyProviderError(err, provider, apiKey);
+          const classified = classifyProviderError(err, execProvider, apiKey);
           if (classified.retryable && attempt === 0) {
             if (
               classified.statusCode === 413 ||
@@ -1201,9 +1307,9 @@ export async function runCouncilEngine(params: {
       }
 
       failedTurnCount += 1;
-      const classified = classifyProviderError(lastErr, provider, apiKey);
+      const classified = classifyProviderError(lastErr, execProvider, apiKey);
       const displayErr = formatClassifiedError(classified, 900);
-      const isFreeProvider = isFreeRateLimitedProvider(provider);
+      const isFreeProvider = isFreeRateLimitedProvider(execProvider);
 
       // ONLY block the entire provider when clearly 401/402/insufficient_quota on non-free providers (expires after ~5 min).
       // For everything else (403, 404, 429 rate limits, 5xx, upstream errors, or any free-provider error),
@@ -1213,9 +1319,9 @@ export async function runCouncilEngine(params: {
           classified.category === 'insufficient_credits'
             ? 'insufficient_credits'
             : 'invalid_credentials';
-        recordProviderHealth(params.uid, provider, providerState, displayErr, classified.category);
+        recordProviderHealth(params.uid, execProvider, providerState, displayErr, classified.category);
       } else {
-        recordModelUnavailable(params.uid, opts.compositeId, displayErr, classified.category);
+        recordModelUnavailable(params.uid, `${execProvider}:${execModelId}`, displayErr, classified.category);
       }
       cachedCatalogModels = null;
 
@@ -1252,7 +1358,10 @@ export async function runCouncilEngine(params: {
       lastHandle?: string | null;
       onFallbackSelected?: (newCompositeId: string) => void;
     }): Promise<TranscriptEntry | null> => {
-      const firstParsed = parseCompositeModel(opts.compositeId);
+      const firstParsed = parseCompositeModel(opts.compositeId, {
+        maskModelDetails: params.maskModelDetails,
+        seatTag: seatTagMap.get(opts.compositeId),
+      });
       const firstAttempt = await runSingleTurn({
         compositeId: opts.compositeId,
         role: opts.role,
@@ -1284,9 +1393,15 @@ export async function runCouncilEngine(params: {
         return null;
       }
 
+      const excludedRealAndSeatIds = new Set(opts.activeRoundIds);
+      for (const ex of resolvedExecMap.values()) {
+        excludedRealAndSeatIds.add(`${ex.execProvider}:${ex.execModelId}`);
+      }
+      const firstExec = resolvedExecMap.get(opts.compositeId);
+
       const fb = await resolveVerifiedFallback({
-        excludedIds: opts.activeRoundIds,
-        failedProvider: firstParsed.provider,
+        excludedIds: excludedRealAndSeatIds,
+        failedProvider: firstExec?.execProvider || firstParsed.provider,
         errorCategory: firstAttempt.errorCategory,
         promptText: opts.prompt,
       });
@@ -1301,14 +1416,26 @@ export async function runCouncilEngine(params: {
         return null;
       }
 
-      const fbParsed = parseCompositeModel(fb.compositeId);
+      const fbOutwardCompositeId = params.maskModelDetails
+        ? `${fb.provider}:managed-fb-${++fallbackCounter}`
+        : fb.compositeId;
+      if (params.maskModelDetails) {
+        resolvedExecMap.set(fbOutwardCompositeId, {
+          execProvider: fb.provider,
+          execModelId: fb.modelId,
+        });
+      }
+
+      const fbParsed = parseCompositeModel(fbOutwardCompositeId, {
+        maskModelDetails: params.maskModelDetails,
+      });
       const reason = firstAttempt.errorSummary || 'Selected model failed';
 
       params.emit({
         type: 'model_fallback',
         originalCompositeId: opts.compositeId,
         originalModelLabel: firstParsed.label,
-        fallbackCompositeId: fb.compositeId,
+        fallbackCompositeId: fbOutwardCompositeId,
         fallbackModelLabel: fbParsed.label,
         errorCategory: firstAttempt.errorCategory,
         reason,
@@ -1316,7 +1443,7 @@ export async function runCouncilEngine(params: {
       });
 
       const secondAttempt = await runSingleTurn({
-        compositeId: fb.compositeId,
+        compositeId: fbOutwardCompositeId,
         role: opts.role,
         round: opts.round,
         stageLabel: `${opts.stageLabel} · Fallback`,
@@ -1328,7 +1455,7 @@ export async function runCouncilEngine(params: {
 
       if (secondAttempt.entry) {
         if (opts.onFallbackSelected) {
-          opts.onFallbackSelected(fb.compositeId);
+          opts.onFallbackSelected(fbOutwardCompositeId);
         }
         return secondAttempt.entry;
       }

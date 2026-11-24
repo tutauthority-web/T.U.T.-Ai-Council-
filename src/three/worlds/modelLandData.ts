@@ -501,8 +501,17 @@ export function buildModelLandDistricts(params: {
   models: ModelInfo[];
   usageRecords: UsageRecordDoc[];
   connectionsLoading: boolean;
+  isPremium?: boolean;
+  hideModelDetails?: boolean;
 }): CityDistrictData[] {
-  const { connections, models, usageRecords, connectionsLoading } = params;
+  const {
+    connections,
+    models,
+    usageRecords,
+    connectionsLoading,
+    isPremium = false,
+    hideModelDetails = false,
+  } = params;
   const connMap = new Map(connections.map((c) => [c.providerId, c]));
 
   // Aggregate today's usage per model
@@ -525,41 +534,74 @@ export function buildModelLandDistricts(params: {
     });
   }
 
-  // Show ALL providers on AI Model Land (both operational and disconnected cities with distinct visuals)
+  // Show ALL providers on AI Model Land (Premium illuminates all 12 cities; Free shows disconnected cities in wireframe)
   const visibleIds = Object.keys(CITY_CONFIGS) as ProviderId[];
 
   return visibleIds.map((pid) => {
-    const config = CITY_CONFIGS[pid];
+    const rawConfig = CITY_CONFIGS[pid];
+    const config: CityArchitectureConfig =
+      pid === 'openai' && (isPremium || hideModelDetails)
+        ? { ...rawConfig, cityName: 'ChatGPT / OpenAI City' }
+        : rawConfig;
     const conn = connMap.get(pid);
     const providerModels = models.filter((m) => m.provider === pid);
-    const health = mapProviderHealthToWorldStatus(conn, connectionsLoading);
+    const rawHealth = mapProviderHealthToWorldStatus(conn, connectionsLoading);
+
+    // For Premium users, every city on AI Model Land is luminous and connected
+    const health: { status: CharacterOperationalStatus; label: string } = isPremium
+      ? {
+          status: 'operational',
+          label: 'Premium Connected',
+        }
+      : rawHealth;
 
     const hasRealModels = providerModels.length > 0;
     const sourceSlice = providerModels.slice(0, 8);
+    const shortProviderName = pid === 'openai' ? 'ChatGPT' : PROVIDER_REGISTRY[pid].shortName;
 
-    const buildings: CityModelBuildingData[] = hasRealModels
+    let buildings: CityModelBuildingData[] = hasRealModels
       ? sourceSlice.map((m, idx) => {
           const mStatus = mapModelStateToWorldStatus(m);
           const u = usageMap.get(m.compositeId) || { tokens: 0, requests: 0 };
+          const redactedDisplay =
+            pid === 'openai'
+              ? idx === 0
+                ? 'ChatGPT'
+                : `ChatGPT Seat ${idx + 1}`
+              : `${shortProviderName} Engine ${idx + 1}`;
           return {
             id: m.compositeId,
             compositeId: m.compositeId,
             buildingNumber: idx + 1,
-            displayName: m.displayName,
-            modelId: m.modelId,
+            displayName: hideModelDetails ? redactedDisplay : m.displayName,
+            modelId: hideModelDetails ? `${shortProviderName} Cloud` : m.modelId,
             providerId: pid,
             cityName: config.cityName,
-            status: connectionsLoading ? 'connecting' : mStatus.status,
-            statusLabel: connectionsLoading ? 'Checking...' : mStatus.label,
+            status: connectionsLoading
+              ? 'connecting'
+              : isPremium
+                ? 'operational'
+                : mStatus.status,
+            statusLabel: connectionsLoading
+              ? 'Checking...'
+              : isPremium
+                ? 'Premium Cloud'
+                : mStatus.label,
             isDemo: false,
             isFreeTier: isModelFreeTier(m),
-            freeTierNote: m.freeTierNote || (isModelFreeTier(m) ? 'Free tier' : 'Paid API'),
-            capabilities: m.capabilities.length > 0 ? m.capabilities : ['Text generation'],
-            contextWindowTokens: m.contextWindowTokens,
+            freeTierNote: hideModelDetails
+              ? 'Included in Premium'
+              : m.freeTierNote || (isModelFreeTier(m) ? 'Free tier' : 'Paid API'),
+            capabilities: hideModelDetails
+              ? ['Auto-Routed', 'Managed Seat', 'Zero Key Hassle']
+              : m.capabilities.length > 0
+                ? m.capabilities
+                : ['Text generation'],
+            contextWindowTokens: hideModelDetails ? null : m.contextWindowTokens,
             supportsMultimodal: m.supportsMultimodal,
             usageTokensToday: u.tokens,
             usageRequestsToday: u.requests,
-            unavailableReason: m.unavailableReason,
+            unavailableReason: isPremium ? undefined : m.unavailableReason,
             localOffset: getBuildingRingOffset(idx, sourceSlice.length),
             heightScale:
               m.tier === 'extreme'
@@ -572,42 +614,79 @@ export function buildModelLandDistricts(params: {
             variant: idx % 3,
           };
         })
-      : (DEMO_PREVIEW_CATALOG[pid] || []).map((demo, idx, arr) => ({
-          id: `demo:${pid}:${demo.modelId}`,
-          compositeId: `${pid}:${demo.modelId}`,
-          buildingNumber: idx + 1,
-          displayName: demo.displayName,
-          modelId: demo.modelId,
-          providerId: pid,
-          cityName: config.cityName,
-          status: health.status === 'error' ? 'error' : 'disconnected',
-          statusLabel:
-            health.status === 'error'
-              ? health.label
-              : `Demo Preview · ${PROVIDER_REGISTRY[pid].shortName} Disconnected`,
-          isDemo: true,
-          isFreeTier: demo.free,
-          freeTierNote: demo.free ? 'Free tier (preview)' : 'Paid API (preview)',
-          capabilities: demo.capabilities,
-          contextWindowTokens: demo.ctx,
-          supportsMultimodal: pid === 'google' || pid === 'openai',
-          usageTokensToday: 0,
-          usageRequestsToday: 0,
-          unavailableReason:
-            conn?.healthMessage ||
-            `Connect your ${PROVIDER_REGISTRY[pid].name} API key in Connections to activate real models.`,
-          localOffset: getBuildingRingOffset(idx, arr.length),
-          heightScale: 0.92 + (idx === 0 ? 0.2 : 0),
-          variant: idx % 3,
-        }));
+      : (DEMO_PREVIEW_CATALOG[pid] || []).map((demo, idx, arr) => {
+          const redactedDisplay =
+            pid === 'openai'
+              ? idx === 0
+                ? 'ChatGPT'
+                : `ChatGPT Seat ${idx + 1}`
+              : `${shortProviderName} Engine ${idx + 1}`;
+          return {
+            id: isPremium ? `premium:${pid}:${idx + 1}` : `demo:${pid}:${demo.modelId}`,
+            compositeId: isPremium ? `${pid}:managed-${idx + 1}` : `${pid}:${demo.modelId}`,
+            buildingNumber: idx + 1,
+            displayName: hideModelDetails
+              ? redactedDisplay
+              : isPremium
+                ? pid === 'openai'
+                  ? `ChatGPT Engine ${idx + 1}`
+                  : `${shortProviderName} Cloud ${idx + 1}`
+                : demo.displayName,
+            modelId: hideModelDetails ? `${shortProviderName} Cloud` : demo.modelId,
+            providerId: pid,
+            cityName: config.cityName,
+            status: isPremium
+              ? 'operational'
+              : health.status === 'error'
+                ? 'error'
+                : 'disconnected',
+            statusLabel: isPremium
+              ? 'Premium Cloud'
+              : health.status === 'error'
+                ? health.label
+                : `Demo Preview · ${PROVIDER_REGISTRY[pid].shortName} Disconnected`,
+            isDemo: !isPremium,
+            isFreeTier: isPremium ? false : demo.free,
+            freeTierNote: isPremium
+              ? 'Included in Premium'
+              : demo.free
+                ? 'Free tier (preview)'
+                : 'Paid API (preview)',
+            capabilities: isPremium
+              ? ['Auto-Routed', 'Managed Seat', 'Premium Cloud']
+              : demo.capabilities,
+            contextWindowTokens: hideModelDetails ? null : demo.ctx,
+            supportsMultimodal: pid === 'google' || pid === 'openai',
+            usageTokensToday: 0,
+            usageRequestsToday: 0,
+            unavailableReason: isPremium
+              ? undefined
+              : conn?.healthMessage ||
+                `Connect your ${PROVIDER_REGISTRY[pid].name} API key in Connections to activate real models.`,
+            localOffset: getBuildingRingOffset(idx, arr.length),
+            heightScale: 0.96 + (idx === 0 ? 0.24 : 0),
+            variant: idx % 3,
+          };
+        });
+
+    if (hideModelDetails && buildings.length > 3) {
+      // Keep skyline vibrant yet compact for shared-API users
+      buildings = buildings.slice(0, 3).map((b, idx, arr) => ({
+        ...b,
+        buildingNumber: idx + 1,
+        localOffset: getBuildingRingOffset(idx, arr.length),
+      }));
+    }
 
     return {
       config,
       status: health.status,
       statusLabel: health.label,
-      isDemo: !hasRealModels,
-      connectedModelsCount: providerModels.length,
-      operationalModelsCount: providerModels.filter((m) => m.available).length,
+      isDemo: isPremium ? false : !hasRealModels,
+      connectedModelsCount: isPremium ? Math.max(buildings.length, providerModels.length) : providerModels.length,
+      operationalModelsCount: isPremium
+        ? buildings.length
+        : providerModels.filter((m) => m.available).length,
       buildings,
     };
   });

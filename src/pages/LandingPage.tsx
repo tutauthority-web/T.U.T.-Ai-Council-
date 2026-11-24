@@ -1,5 +1,7 @@
 import { lazy, Suspense, useState } from 'react';
 import { ArrowRight, Check, Lock, Scale, ShieldCheck, Layers } from 'lucide-react';
+import heroChamberImg from '../assets/images/hero_council_chamber_1795008973998.jpg';
+import deliberationMatrixImg from '../assets/images/deliberation_matrix_1795008974471.jpg';
 import { useAuth } from '../contexts/AuthContext';
 import type { AppRoute } from '../components/AppShell';
 import { PROVIDER_LIST } from '../shared/providers';
@@ -69,7 +71,7 @@ export function LandingPage({ onNavigate }: { onNavigate: (route: AppRoute) => v
                 Multi-provider AI deliberation built for high-stakes decisions.
               </h1>
               <p className="text-base sm:text-lg text-slate-300 leading-relaxed max-w-xl">
-                Connect your own Google Gemini, OpenAI, Anthropic, Groq, Cohere, NVIDIA NIM, SambaNova, HuggingFace, and other provider credentials. Bring multiple models into a single structured room where each model answers independently, cross-examines peers, revises conclusions, and submits to an impartial Moderator verdict.
+                Connect your own Google Gemini, ChatGPT / OpenAI, Anthropic, Groq, Cohere, NVIDIA NIM, SambaNova, HuggingFace, and other provider credentials. Bring multiple models into a single structured room where each model answers independently, cross-examines peers, revises conclusions, and submits to an impartial Moderator verdict.
               </p>
 
               <div className="flex flex-wrap items-center gap-4 pt-2">
@@ -104,9 +106,8 @@ export function LandingPage({ onNavigate }: { onNavigate: (route: AppRoute) => v
                   fallback={
                     !heroError ? (
                       <img
-                        src="/src/assets/images/hero_council_chamber_1795008973998.jpg"
+                        src={heroChamberImg}
                         alt="Minimalist dark slate deliberation chamber representing multi-model AI collaboration"
-                        referrerPolicy="no-referrer"
                         onError={() => setHeroError(true)}
                         className="w-full h-full object-cover"
                       />
@@ -193,9 +194,8 @@ export function LandingPage({ onNavigate }: { onNavigate: (route: AppRoute) => v
                 <div className="h-full min-h-[260px] rounded-xl overflow-hidden border border-slate-800 bg-[#0F172A]">
                   {!matrixError ? (
                     <img
-                      src="/src/assets/images/deliberation_matrix_1795008974471.jpg"
+                      src={deliberationMatrixImg}
                       alt="Intersecting dark glass architectural planes illustrating multi-model synthesis"
-                      referrerPolicy="no-referrer"
                       onError={() => setMatrixError(true)}
                       className="w-full h-full object-cover"
                     />

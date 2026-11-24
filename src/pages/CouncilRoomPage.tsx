@@ -33,7 +33,11 @@ import {
   updateCouncilRunState,
   updateMessageReactions,
 } from '../lib/firestoreService';
-import { isValidProviderId, PROVIDER_REGISTRY } from '../shared/providers';
+import {
+  formatParticipantDisplayLabel,
+  isValidProviderId,
+  PROVIDER_REGISTRY,
+} from '../shared/providers';
 import type {
   CouncilMessageDoc,
   CouncilSSEEvent,
@@ -42,18 +46,38 @@ import type {
   ReplyToRef,
 } from '../shared/types';
 
-function resolveFilterModelChip(compositeId: string): FilterModelChip {
+function resolveFilterModelChip(
+  compositeId: string,
+  hideModelDetails: boolean,
+): FilterModelChip {
   const idx = compositeId.indexOf(':');
   if (idx === -1) {
     return {
       compositeId,
       providerId: 'google',
-      label: compositeId,
+      label: hideModelDetails
+        ? formatParticipantDisplayLabel({
+            provider: 'google',
+            modelId: compositeId,
+            hideModelDetails: true,
+          })
+        : compositeId,
     };
   }
   const raw = compositeId.slice(0, idx);
   const modelId = compositeId.slice(idx + 1);
   const providerId: ProviderId = isValidProviderId(raw) ? raw : 'google';
+  if (hideModelDetails) {
+    return {
+      compositeId,
+      providerId,
+      label: formatParticipantDisplayLabel({
+        provider: providerId,
+        modelId,
+        hideModelDetails: true,
+      }),
+    };
+  }
   const shortProvider = PROVIDER_REGISTRY[providerId]?.shortName || raw;
   return {
     compositeId,
@@ -90,8 +114,10 @@ export function CouncilRoomPage({
   onClearInitialPrompt: () => void;
   onNavigate: (route: AppRoute) => void;
 }) {
-  const { user, councils, addSessionUsage, refreshProviderState } = useAuth();
+  const { user, councils, isPremium, isAdmin, addSessionUsage, refreshProviderState } =
+    useAuth();
   const council = councils.find((c) => c.id === councilId) || null;
+  const hideModelDetails = isPremium && !isAdmin;
 
   const [messages, setMessages] = useState<CouncilMessageDoc[]>([]);
   const [optimisticUserMsg, setOptimisticUserMsg] = useState<CouncilMessageDoc | null>(null);
@@ -927,15 +953,51 @@ export function CouncilRoomPage({
         : council.mode === 'debate'
           ? 'Structured Debate'
           : 'Free Discussion';
+    const participantSummary = council.selectedModels
+      .map((cid, idx) => {
+        const sep = cid.indexOf(':');
+        const rawP = sep === -1 ? 'google' : cid.slice(0, sep);
+        const mid = sep === -1 ? cid : cid.slice(sep + 1);
+        const pid: ProviderId = isValidProviderId(rawP) ? rawP : 'google';
+        return hideModelDetails
+          ? formatParticipantDisplayLabel({
+              provider: pid,
+              modelId: mid,
+              hideModelDetails: true,
+              seatLabel: `Seat ${idx + 1}`,
+            })
+          : cid;
+      })
+      .join(', ');
+    const moderatorDisplay = (() => {
+      if (!hideModelDetails || !council.moderatorModel || council.moderatorModel === 'none') {
+        return council.moderatorModel;
+      }
+      const sep = council.moderatorModel.indexOf(':');
+      const rawP = sep === -1 ? 'google' : council.moderatorModel.slice(0, sep);
+      const mid = sep === -1 ? council.moderatorModel : council.moderatorModel.slice(sep + 1);
+      const pid: ProviderId = isValidProviderId(rawP) ? rawP : 'google';
+      return formatParticipantDisplayLabel({
+        provider: pid,
+        modelId: mid,
+        hideModelDetails: true,
+      });
+    })();
     const lines: string[] = [
       `# ${council.title}`,
       `Mode: ${modeName}`,
-      `Models: ${council.selectedModels.join(', ')}`,
-      ...(council.mode !== 'chat' ? [`Moderator: ${council.moderatorModel}`] : []),
+      `Participants: ${participantSummary}`,
+      ...(council.mode !== 'chat' ? [`Moderator: ${moderatorDisplay}`] : []),
       '',
     ];
     for (const m of messages) {
-      lines.push(`## ${m.stageLabel} — ${m.modelLabel} (${m.status})`);
+      const displaySpeaker = formatParticipantDisplayLabel({
+        provider: m.provider,
+        modelId: m.modelId,
+        modelLabel: m.modelLabel,
+        hideModelDetails,
+      });
+      lines.push(`## ${m.stageLabel} — ${displaySpeaker} (${m.status})`);
       lines.push('');
       lines.push(m.content || (m.errorMessage ? `Error: ${m.errorMessage}` : '(empty)'));
       lines.push('');
@@ -953,7 +1015,63 @@ export function CouncilRoomPage({
 
   const handleExportJSON = () => {
     if (!council) return;
-    const payload = { council, messages, fallbackHistory };
+    const sanitizeParticipant = (cid: string, seatIdx?: number) => {
+      const sep = cid.indexOf(':');
+      const rawP = sep === -1 ? 'google' : cid.slice(0, sep);
+      const mid = sep === -1 ? cid : cid.slice(sep + 1);
+      const pid: ProviderId = isValidProviderId(rawP) ? rawP : 'google';
+      return formatParticipantDisplayLabel({
+        provider: pid,
+        modelId: mid,
+        hideModelDetails: true,
+        ...(typeof seatIdx === 'number' ? { seatLabel: `Seat ${seatIdx + 1}` } : {}),
+      });
+    };
+    const payload = hideModelDetails
+      ? {
+          council: {
+            ...council,
+            selectedModels: council.selectedModels.map((cid, idx) =>
+              sanitizeParticipant(cid, idx),
+            ),
+            moderatorModel:
+              council.moderatorModel === 'none'
+                ? 'none'
+                : sanitizeParticipant(council.moderatorModel),
+          },
+          messages: messages.map((m) => ({
+            ...m,
+            modelId: m.role === 'user' ? 'user' : 'managed',
+            modelLabel: formatParticipantDisplayLabel({
+              provider: m.provider,
+              modelId: m.modelId,
+              modelLabel: m.modelLabel,
+              hideModelDetails: true,
+            }),
+            ...(m.replyTo
+              ? {
+                  replyTo: {
+                    ...m.replyTo,
+                    modelId: m.replyTo.role === 'user' ? 'user' : 'managed',
+                    modelLabel: formatParticipantDisplayLabel({
+                      provider: m.replyTo.provider,
+                      modelId: m.replyTo.modelId,
+                      modelLabel: m.replyTo.modelLabel,
+                      hideModelDetails: true,
+                    }),
+                  },
+                }
+              : {}),
+          })),
+          fallbackHistory: fallbackHistory.map((fb) => ({
+            ...fb,
+            originalCompositeId: sanitizeParticipant(fb.originalCompositeId),
+            originalModelLabel: sanitizeParticipant(fb.originalCompositeId),
+            fallbackCompositeId: sanitizeParticipant(fb.fallbackCompositeId),
+            fallbackModelLabel: sanitizeParticipant(fb.fallbackCompositeId),
+          })),
+        }
+      : { council, messages, fallbackHistory };
     const blob = new Blob([JSON.stringify(payload, null, 2)], {
       type: 'application/json;charset=utf-8',
     });
@@ -1049,11 +1167,11 @@ export function CouncilRoomPage({
       const activeId = fb ? fb.fallbackCompositeId : originalId;
       if (!seen.has(activeId)) {
         seen.add(activeId);
-        list.push(resolveFilterModelChip(activeId));
+        list.push(resolveFilterModelChip(activeId, hideModelDetails));
       }
     }
     return list;
-  }, [council, activeFallbacksByOriginal]);
+  }, [council, activeFallbacksByOriginal, hideModelDetails]);
 
   const visibleItems = useMemo(() => {
     if (selectedFilter === 'all') return allItems;
@@ -1196,7 +1314,7 @@ export function CouncilRoomPage({
       <AppShell
         currentRoute="council-room"
         pageTitle="Council Room"
-        breadcrumb="History"
+        breadcrumb="Chat History"
         onNavigate={onNavigate}
         fullBleed
       >
@@ -1208,7 +1326,7 @@ export function CouncilRoomPage({
               onClick={() => onNavigate('history')}
               className="px-4 py-2 text-xs font-medium bg-white/10 hover:bg-white/15 border border-white/15 text-slate-100 rounded-xl transition-colors cursor-pointer"
             >
-              Back to History
+              Back to Chat History
             </button>
           </div>
         </div>
@@ -1379,6 +1497,7 @@ export function CouncilRoomPage({
             onStop={() => void handleStop()}
             onExportMarkdown={handleExportMarkdown}
             onExportJSON={handleExportJSON}
+            hideModelDetails={hideModelDetails}
           />
 
           {/* Collapsible Run Details Drawer */}
@@ -1389,6 +1508,7 @@ export function CouncilRoomPage({
             fallbackHistory={fallbackHistory}
             persistedErrors={persistedErrors}
             removedModels={removedModels}
+            hideModelDetails={hideModelDetails}
           />
 
           {/* Compact Filter & Round Bar (only when useful) */}
@@ -1401,6 +1521,7 @@ export function CouncilRoomPage({
               activeRound={activeRound}
               onSelectRound={handleJumpToRound}
               isChatMode={isChatMode}
+              hideModelDetails={hideModelDetails}
             />
           )}
 
@@ -1442,6 +1563,7 @@ export function CouncilRoomPage({
                           isChatMode={isChatMode}
                           isCopied={copiedId === itemId}
                           duplicateModelSet={duplicateModelSet}
+                          hideModelDetails={hideModelDetails}
                           onCopy={handleCopyMessage}
                           onToggleReaction={handleToggleUserReaction}
                           onReply={handleSelectReplyTarget}
@@ -1482,6 +1604,7 @@ export function CouncilRoomPage({
                                 isChatMode={isChatMode}
                                 isCopied={copiedId === itemId}
                                 duplicateModelSet={duplicateModelSet}
+                                hideModelDetails={hideModelDetails}
                                 onCopy={handleCopyMessage}
                                 onToggleReaction={handleToggleUserReaction}
                                 onReply={handleSelectReplyTarget}
@@ -1547,6 +1670,7 @@ export function CouncilRoomPage({
               replyTarget={replyTarget}
               queuedPrompt={queuedPrompt}
               lastUserMessageText={lastUserMessageText}
+              hideModelDetails={hideModelDetails}
               onCancelReply={handleCancelReply}
               onSend={handleSendComposer}
               onQueueMessage={handleQueueMessage}

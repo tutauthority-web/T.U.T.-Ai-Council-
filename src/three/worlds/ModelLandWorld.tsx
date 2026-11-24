@@ -21,6 +21,7 @@ interface ModelLandWorldProps {
   selectedCityId: ProviderId | null;
   selectedBuildingId: string | null;
   showLabels?: boolean;
+  isPremium?: boolean;
   resetCameraSeq?: number;
   onSelectCity: (providerId: ProviderId) => void;
   onSelectBuilding: (building: CityModelBuildingData) => void;
@@ -903,12 +904,103 @@ function InterCityEnergyRoutes({
   );
 }
 
+function PremiumWorldAura({
+  isDay,
+  reducedMotion,
+}: {
+  isDay: boolean;
+  reducedMotion: boolean;
+}) {
+  const { qualityTier } = useWorldTheme();
+  const ringARef = useRef<THREE.Mesh | null>(null);
+  const ringBRef = useRef<THREE.Mesh | null>(null);
+  const crystalRef = useRef<THREE.Mesh | null>(null);
+  const motesRef = useRef<THREE.Points | null>(null);
+  const count = qualityTier === 'lite' ? 90 : 180;
+
+  const motesGeo = useMemo(() => {
+    const arr = new Float32Array(count * 3);
+    for (let i = 0; i < count; i += 1) {
+      const a = i * 2.39996;
+      const r = 4 + ((i * 19) % 24);
+      arr[i * 3] = Math.cos(a) * r;
+      arr[i * 3 + 1] = 2.8 + ((i * 13) % 28) * 0.25;
+      arr[i * 3 + 2] = Math.sin(a) * r;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+    return geo;
+  }, [count]);
+
+  useEffect(() => () => motesGeo.dispose(), [motesGeo]);
+
+  useFrame((state, delta) => {
+    if (reducedMotion) return;
+    const t = state.clock.elapsedTime;
+    if (ringARef.current) {
+      ringARef.current.rotation.z += delta * 0.55;
+      ringARef.current.rotation.x = Math.PI / 2.4 + Math.sin(t * 0.7) * 0.14;
+    }
+    if (ringBRef.current) {
+      ringBRef.current.rotation.z -= delta * 0.42;
+      ringBRef.current.rotation.y = Math.cos(t * 0.6) * 0.22;
+    }
+    if (crystalRef.current) {
+      crystalRef.current.rotation.y += delta * 1.1;
+      crystalRef.current.position.y = 2.15 + Math.sin(t * 1.8) * 0.16;
+    }
+    if (motesRef.current) {
+      motesRef.current.rotation.y += delta * 0.04;
+    }
+  });
+
+  return (
+    <group name="PremiumWorldAura">
+      <mesh ref={ringARef} position={[0, 1.5, 0]}>
+        <torusGeometry args={[2.55, 0.05, 10, 48]} />
+        <meshStandardMaterial
+          color="#fbbf24"
+          emissive="#f59e0b"
+          emissiveIntensity={isDay ? 0.7 : 1.7}
+        />
+      </mesh>
+      <mesh ref={ringBRef} position={[0, 1.5, 0]} rotation={[Math.PI / 2.8, 0.4, 0]}>
+        <torusGeometry args={[3.1, 0.04, 10, 48]} />
+        <meshStandardMaterial
+          color="#38bdf8"
+          emissive="#38bdf8"
+          emissiveIntensity={isDay ? 0.6 : 1.55}
+        />
+      </mesh>
+      <mesh ref={crystalRef} position={[0, 2.15, 0]}>
+        <octahedronGeometry args={[0.32, 0]} />
+        <meshStandardMaterial
+          color="#fde68a"
+          emissive="#fbbf24"
+          emissiveIntensity={1.9}
+        />
+      </mesh>
+      <points ref={motesRef} geometry={motesGeo}>
+        <pointsMaterial
+          color={isDay ? '#fde68a' : '#fcd34d'}
+          size={0.18}
+          transparent
+          opacity={isDay ? 0.55 : 0.75}
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+        />
+      </points>
+    </group>
+  );
+}
+
 export function ModelLandWorld({
   districts,
   level,
   selectedCityId,
   selectedBuildingId,
   showLabels = true,
+  isPremium = false,
   resetCameraSeq = 0,
   onSelectCity,
   onSelectBuilding,
@@ -988,6 +1080,8 @@ export function ModelLandWorld({
         level={level}
         reducedMotion={reducedMotion}
       />
+
+      {isPremium && <PremiumWorldAura isDay={isDay} reducedMotion={reducedMotion} />}
 
       {districts.map((district) => (
         <ProviderCityIsland

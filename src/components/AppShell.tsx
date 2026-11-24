@@ -10,6 +10,7 @@ import {
   LogIn,
   LogOut,
   Menu,
+  MessageSquare,
   MessageSquarePlus,
   Settings,
   ShieldCheck,
@@ -73,7 +74,7 @@ const WORKSPACE_NAV_ITEMS: NavItem[] = [
   { id: 'dashboard', label: 'AI Playground', icon: LayoutDashboard },
   { id: 'new-council', label: 'New Council Room', icon: MessageSquarePlus },
   { id: 'models', label: 'AI Model Land', icon: Layers },
-  { id: 'history', label: 'Conversation History', icon: Archive },
+  { id: 'history', label: 'Chat History', icon: MessageSquare },
 ];
 
 const USER_PORTAL_NAV_ITEMS: NavItem[] = [
@@ -97,7 +98,7 @@ const BOTTOM_BAR_ITEMS: Array<{
   { id: 'dashboard', label: 'Playground', icon: Sparkles },
   { id: 'models', label: 'Model Land', icon: Globe },
   { id: 'premium', label: 'Premium', icon: Crown, isPremium: true },
-  { id: 'history', label: 'History', icon: Archive },
+  { id: 'history', label: 'Chat History', icon: MessageSquare },
   { id: 'portal', label: 'Portal', icon: UserRound },
 ];
 

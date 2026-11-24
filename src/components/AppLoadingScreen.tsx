@@ -29,55 +29,55 @@ export function AppLoadingScreen({
         exiting ? 'opacity-0 pointer-events-none' : 'opacity-100'
       } ${isDay ? 'bg-[#ECF4FD] text-slate-900' : 'bg-[#070B16] text-slate-100'}`}
     >
-      {/* Subtle atmospheric radial depth */}
+      {/* Atmospheric radial glow */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0"
+        className={`pointer-events-none absolute inset-0 ${reducedMotion ? '' : 'animate-aura-drift'}`}
         style={{
           background: isDay
-            ? 'radial-gradient(circle at 50% 42%, rgba(56, 189, 248, 0.22) 0%, rgba(129, 140, 248, 0.08) 42%, transparent 72%)'
-            : 'radial-gradient(circle at 50% 42%, rgba(56, 189, 248, 0.16) 0%, rgba(124, 58, 237, 0.12) 38%, transparent 72%)',
+            ? 'radial-gradient(circle at 50% 42%, rgba(56, 189, 248, 0.24) 0%, rgba(129, 140, 248, 0.1) 44%, transparent 72%)'
+            : 'radial-gradient(circle at 50% 42%, rgba(56, 189, 248, 0.18) 0%, rgba(124, 58, 237, 0.14) 40%, transparent 72%)',
         }}
       />
 
-      {/* Top spacer for vertical optical centering */}
       <div className="h-4 shrink-0" />
 
       {/* Center Nova Orbital Emblem & Typography */}
       <div className="relative z-10 flex flex-col items-center text-center max-w-sm w-full">
-        <div className="relative w-28 h-28 flex items-center justify-center mb-7">
+        <div className="relative w-32 h-32 flex items-center justify-center mb-7">
           {/* Outer rotating orbital ring */}
           <svg
             viewBox="0 0 120 120"
             className={`absolute inset-0 w-full h-full ${
-              reducedMotion ? '' : 'animate-[spin_14s_linear_infinite]'
+              reducedMotion ? '' : 'animate-[spin_12s_linear_infinite]'
             }`}
             aria-hidden="true"
           >
             <defs>
               <linearGradient id="tutOrbitGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stopColor="#38BDF8" stopOpacity="0.95" />
-                <stop offset="55%" stopColor="#818CF8" stopOpacity="0.65" />
+                <stop offset="0%" stopColor="#38BDF8" stopOpacity="0.98" />
+                <stop offset="55%" stopColor="#818CF8" stopOpacity="0.72" />
                 <stop offset="100%" stopColor="#8B5CF6" stopOpacity="0.1" />
               </linearGradient>
             </defs>
             <circle
               cx="60"
               cy="60"
-              r="54"
+              r="55"
               fill="none"
               stroke="url(#tutOrbitGrad)"
-              strokeWidth="1.75"
-              strokeDasharray="190 150"
+              strokeWidth="1.9"
+              strokeDasharray="210 140"
               strokeLinecap="round"
             />
-            <circle cx="60" cy="6" r="3" fill="#38BDF8" />
+            <circle cx="60" cy="5" r="3.2" fill="#38BDF8" />
+            <circle cx="60" cy="115" r="2.2" fill="#A78BFA" />
           </svg>
 
           {/* Counter-rotating hexagonal council ring */}
           <svg
             viewBox="0 0 120 120"
-            className={`absolute inset-2 w-[calc(100%-1rem)] h-[calc(100%-1rem)] ${
+            className={`absolute inset-2.5 w-[calc(100%-1.25rem)] h-[calc(100%-1.25rem)] ${
               reducedMotion ? '' : 'animate-[spin_18s_linear_infinite_reverse]'
             }`}
             aria-hidden="true"
@@ -85,20 +85,20 @@ export function AppLoadingScreen({
             <polygon
               points="60,12 102,36 102,84 60,108 18,84 18,36"
               fill="none"
-              stroke={isDay ? 'rgba(37, 99, 235, 0.28)' : 'rgba(148, 163, 184, 0.25)'}
-              strokeWidth="1.25"
+              stroke={isDay ? 'rgba(37, 99, 235, 0.34)' : 'rgba(148, 163, 184, 0.3)'}
+              strokeWidth="1.35"
             />
           </svg>
 
           {/* Central Nova Core Visor Emblem */}
           <div
-            className={`relative w-14 h-14 rounded-2xl flex items-center justify-center border shadow-lg ${
+            className={`relative w-16 h-16 rounded-2xl flex items-center justify-center border shadow-xl ${
               isDay
-                ? 'bg-white border-sky-200 shadow-sky-200/60'
-                : 'bg-[#0E162B] border-sky-400/35 shadow-sky-950/60'
+                ? 'bg-white border-sky-200 shadow-sky-200/70'
+                : 'bg-[#0E162B] border-sky-400/40 shadow-sky-950/70'
             }`}
           >
-            <svg viewBox="0 0 40 40" className="w-8 h-8" aria-hidden="true">
+            <svg viewBox="0 0 40 40" className="w-9 h-9" aria-hidden="true">
               <defs>
                 <linearGradient id="tutCoreGrad" x1="0%" y1="0%" x2="100%" y2="100%">
                   <stop offset="0%" stopColor="#38BDF8" />
@@ -142,10 +142,10 @@ export function AppLoadingScreen({
           {stage}
         </p>
 
-        {/* Clean Determinate Progress Track */}
-        <div className="mt-7 w-full max-w-[260px] space-y-2">
+        {/* Clean Determinate Progress Track with subtle shimmer */}
+        <div className="mt-7 w-full max-w-[270px] space-y-2">
           <div
-            className={`h-1.5 w-full rounded-full overflow-hidden ${
+            className={`relative h-1.5 w-full rounded-full overflow-hidden ${
               isDay ? 'bg-slate-200' : 'bg-slate-800/90'
             }`}
           >
@@ -153,6 +153,9 @@ export function AppLoadingScreen({
               className="h-full rounded-full bg-gradient-to-r from-sky-400 via-blue-500 to-violet-500 transition-[width] duration-300 ease-out"
               style={{ width: `${clampedProgress}%` }}
             />
+            {!reducedMotion && (
+              <div className="pointer-events-none absolute inset-0 animate-council-shimmer" />
+            )}
           </div>
           <div
             className={`flex items-center justify-between text-[11px] font-mono tabular-nums ${
@@ -165,7 +168,6 @@ export function AppLoadingScreen({
         </div>
       </div>
 
-      {/* Quiet Bottom Tagline */}
       <p
         className={`relative z-10 text-xs tracking-wide ${
           isDay ? 'text-slate-500' : 'text-slate-500'

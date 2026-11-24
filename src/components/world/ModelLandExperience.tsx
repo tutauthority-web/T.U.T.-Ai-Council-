@@ -4,6 +4,7 @@ import {
   Building2,
   Check,
   Compass,
+  Crown,
   Eye,
   EyeOff,
   Globe,
@@ -41,6 +42,8 @@ export function ModelLandExperience({
   onSwitchToListView,
 }: ModelLandExperienceProps) {
   const {
+    isPremium,
+    isAdmin,
     connections,
     models,
     usageRecords,
@@ -48,6 +51,8 @@ export function ModelLandExperience({
     refreshProviderState,
   } = useAuth();
   const { isDay, toggleTimeOfDay } = useWorldTheme();
+
+  const hideModelDetails = isPremium && !isAdmin;
 
   const [level, setLevel] = useState<ModelLandLevel>('world');
   const [selectedCityId, setSelectedCityId] = useState<ProviderId | null>(null);
@@ -63,8 +68,10 @@ export function ModelLandExperience({
         models,
         usageRecords,
         connectionsLoading,
+        isPremium,
+        hideModelDetails,
       }),
-    [connections, models, usageRecords, connectionsLoading],
+    [connections, models, usageRecords, connectionsLoading, isPremium, hideModelDetails],
   );
 
   const activeDistrict = useMemo(
@@ -209,6 +216,7 @@ export function ModelLandExperience({
           selectedCityId={selectedCityId}
           selectedBuildingId={selectedBuildingId}
           showLabels={!hudHidden}
+          isPremium={isPremium}
           resetCameraSeq={resetCameraSeq}
           onSelectCity={handleSelectCity}
           onSelectBuilding={handleSelectBuilding}
@@ -220,7 +228,7 @@ export function ModelLandExperience({
         <div className="flex items-center justify-between gap-2">
           {!hudHidden ? (
             <div
-              className={`pointer-events-auto flex items-center gap-2.5 px-3 py-2 rounded-2xl border min-w-0 max-w-[66vw] sm:max-w-md ${hudSurfaceClass}`}
+              className={`pointer-events-auto flex items-center gap-2.5 px-3 py-2 rounded-2xl border backdrop-blur-md min-w-0 max-w-[66vw] sm:max-w-md ${hudSurfaceClass}`}
             >
               <AppShellMobileMenuButton />
               {level !== 'world' && (
@@ -234,16 +242,26 @@ export function ModelLandExperience({
                 </button>
               )}
               <div className="min-w-0">
-                <h1 className="font-display text-sm sm:text-base font-bold leading-tight truncate">
-                  AI Model Land
-                </h1>
+                <div className="flex items-center gap-1.5">
+                  <h1 className="font-display text-sm sm:text-base font-bold leading-tight truncate">
+                    AI Model Land
+                  </h1>
+                  {isPremium && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/40 text-[10px] font-semibold text-amber-400 shrink-0">
+                      <Crown className="w-2.5 h-2.5" />
+                      Premium
+                    </span>
+                  )}
+                </div>
                 <p
                   className={`text-[11px] leading-tight truncate ${
                     isDay ? 'text-slate-600' : 'text-slate-300'
                   }`}
                 >
                   {level === 'world'
-                    ? `${onlineCitiesCount}/${districts.length} cities active · Explore every provider`
+                    ? isPremium
+                      ? `All ${districts.length} provider cities connected · Premium Cloud`
+                      : `${onlineCitiesCount}/${districts.length} cities active · Explore every provider`
                     : level === 'city' && activeDistrict
                       ? `${activeDistrict.config.cityName} · ${activeDistrict.statusLabel}`
                       : activeBuilding
@@ -360,7 +378,7 @@ export function ModelLandExperience({
       {/* Building Inspector Card (Visible in Building View) */}
       {!hudHidden && level === 'building' && activeBuilding && (
         <aside
-          className={`pointer-events-auto absolute bottom-16 left-3 right-3 sm:left-auto sm:right-5 sm:bottom-20 z-30 sm:w-full sm:max-w-sm rounded-2xl border p-4 space-y-3 ${hudSurfaceClass}`}
+          className={`pointer-events-auto animate-panel-enter absolute bottom-16 left-3 right-3 sm:left-auto sm:right-5 sm:bottom-20 z-30 sm:w-full sm:max-w-sm rounded-2xl border backdrop-blur-md p-4 space-y-3 ${hudSurfaceClass}`}
         >
           <div className="flex items-start justify-between gap-2.5">
             <div className="min-w-0">
@@ -383,8 +401,13 @@ export function ModelLandExperience({
                 </span>
               </div>
               <p className="text-[11px] opacity-75 truncate mt-0.5">
-                {activeBuilding.cityName}, Building {activeBuilding.buildingNumber} ·{' '}
-                <span className="font-mono">{activeBuilding.modelId}</span>
+                {activeBuilding.cityName}, Building {activeBuilding.buildingNumber}
+                {!hideModelDetails && (
+                  <>
+                    {' · '}
+                    <span className="font-mono">{activeBuilding.modelId}</span>
+                  </>
+                )}
               </p>
             </div>
             <button
@@ -471,7 +494,16 @@ export function ModelLandExperience({
           )}
 
           <div className="flex items-center gap-2">
-            {!activeBuilding.isDemo && activeBuilding.status === 'operational' ? (
+            {hideModelDetails ? (
+              <button
+                type="button"
+                onClick={() => onNavigate('new-council')}
+                className="w-full inline-flex items-center justify-center gap-2 min-h-[38px] px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition-colors cursor-pointer"
+              >
+                <MessageSquarePlus className="w-3.5 h-3.5" />
+                Launch Council with {activeBuilding.providerId === 'openai' ? 'ChatGPT' : PROVIDER_REGISTRY[activeBuilding.providerId].shortName}
+              </button>
+            ) : !activeBuilding.isDemo && activeBuilding.status === 'operational' ? (
               <>
                 <button
                   type="button"

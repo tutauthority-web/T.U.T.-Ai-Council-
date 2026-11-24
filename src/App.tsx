@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AppLoadingScreen } from './components/AppLoadingScreen';
 import type { AppRoute } from './components/AppShell';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { PremiumPromoModal } from './components/PremiumPromoModal';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { WorldThemeProvider } from './contexts/WorldThemeContext';
 import { AdminPortalPage } from './pages/AdminPortalPage';
@@ -66,8 +67,37 @@ function readGatewayReturnFromLocation(): Record<string, string> | null {
   return Object.keys(captured).length > 0 ? captured : null;
 }
 
+const PROMO_SESSION_KEY = 'tut_premium_promo_seen';
+const PROMO_ELIGIBLE_ROUTES: ReadonlySet<AppRoute> = new Set([
+  'dashboard',
+  'models',
+  'connections',
+  'history',
+  'portal',
+  'usage',
+  'settings',
+]);
+
+function readPromoSeen(): boolean {
+  if (typeof window === 'undefined') return true;
+  try {
+    return window.sessionStorage.getItem(PROMO_SESSION_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function markPromoSeen(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem(PROMO_SESSION_KEY, '1');
+  } catch {
+    // Ignore storage errors
+  }
+}
+
 function AppRouter() {
-  const { user, authReady } = useAuth();
+  const { user, authReady, subscription, isPremium, isAdmin } = useAuth();
   const [gatewayReturnParams, setGatewayReturnParams] = useState<Record<string, string> | null>(
     () => readGatewayReturnFromLocation(),
   );
@@ -79,12 +109,60 @@ function AppRouter() {
   const [draftModels, setDraftModels] = useState<string[]>([]);
   const [draftModerator, setDraftModerator] = useState<string | undefined>(undefined);
   const [draftMode, setDraftMode] = useState<DiscussionMode>('chat');
+  const [promoOpen, setPromoOpen] = useState(false);
+  const [hasInteracted, setHasInteracted] = useState(false);
+  const dwellCompleteRef = useRef(false);
 
   useEffect(() => {
     if (gatewayReturnParams && typeof window !== 'undefined' && window.location.search) {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, [gatewayReturnParams]);
+
+  useEffect(() => {
+    if (hasInteracted || typeof window === 'undefined') return;
+    const onInteract = () => setHasInteracted(true);
+    window.addEventListener('pointerdown', onInteract, { passive: true, once: true });
+    window.addEventListener('keydown', onInteract, { passive: true, once: true });
+    window.addEventListener('scroll', onInteract, { passive: true, once: true });
+    return () => {
+      window.removeEventListener('pointerdown', onInteract);
+      window.removeEventListener('keydown', onInteract);
+      window.removeEventListener('scroll', onInteract);
+    };
+  }, [hasInteracted]);
+
+  const promoEligible =
+    authReady &&
+    subscription !== null &&
+    Boolean(user && user.emailVerified) &&
+    !isPremium &&
+    !isAdmin &&
+    !gatewayReturnParams &&
+    PROMO_ELIGIBLE_ROUTES.has(route) &&
+    !readPromoSeen();
+
+  useEffect(() => {
+    if (!promoEligible) {
+      dwellCompleteRef.current = false;
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      dwellCompleteRef.current = true;
+      if (hasInteracted && !readPromoSeen()) {
+        markPromoSeen();
+        setPromoOpen(true);
+      }
+    }, 10500);
+    return () => window.clearTimeout(timer);
+  }, [promoEligible, hasInteracted]);
+
+  useEffect(() => {
+    if (promoEligible && hasInteracted && dwellCompleteRef.current && !readPromoSeen()) {
+      markPromoSeen();
+      setPromoOpen(true);
+    }
+  }, [promoEligible, hasInteracted]);
 
   const navigate = (nextRoute: AppRoute, councilId?: string) => {
     setRoute(nextRoute);
@@ -93,22 +171,19 @@ function AppRouter() {
     }
   };
 
+  let pageContent: React.ReactNode;
+
   if (!authReady) {
-    return (
+    pageContent = (
       <AppLoadingScreen
         stage="Initializing workspace..."
         progress={32}
       />
     );
-  }
-
-  // Publicly accessible universe & membership screens (no hard gate on initial entry)
-  if (route === 'landing') {
-    return <LandingPage onNavigate={navigate} />;
-  }
-
-  if (route === 'dashboard') {
-    return (
+  } else if (route === 'landing') {
+    pageContent = <LandingPage onNavigate={navigate} />;
+  } else if (route === 'dashboard') {
+    pageContent = (
       <DashboardPage
         onNavigate={navigate}
         onEnterNewCouncil={(mode) => {
@@ -117,10 +192,8 @@ function AppRouter() {
         }}
       />
     );
-  }
-
-  if (route === 'models') {
-    return (
+  } else if (route === 'models') {
+    pageContent = (
       <ModelLibraryPage
         onNavigate={navigate}
         onStartCouncilWithSelection={(models, mod) => {
@@ -130,22 +203,17 @@ function AppRouter() {
         }}
       />
     );
-  }
-
-  if (route === 'premium') {
-    return (
+  } else if (route === 'premium') {
+    pageContent = (
       <PremiumPage
         onNavigate={navigate}
         initialGatewayReturn={gatewayReturnParams}
         onClearGatewayReturn={() => setGatewayReturnParams(null)}
       />
     );
-  }
-
-  // Require authenticated + verified user for private workspace pages
-  if (!user || !user.emailVerified || route === 'auth') {
+  } else if (!user || !user.emailVerified || route === 'auth') {
     if (user && user.emailVerified && route === 'auth') {
-      return (
+      pageContent = (
         <DashboardPage
           onNavigate={navigate}
           onEnterNewCouncil={(mode) => {
@@ -154,16 +222,13 @@ function AppRouter() {
           }}
         />
       );
+    } else {
+      pageContent = <AuthPage onNavigate={navigate} />;
     }
-    return <AuthPage onNavigate={navigate} />;
-  }
-
-  if (route === 'connections') {
-    return <ConnectionsPage onNavigate={navigate} />;
-  }
-
-  if (route === 'new-council') {
-    return (
+  } else if (route === 'connections') {
+    pageContent = <ConnectionsPage onNavigate={navigate} />;
+  } else if (route === 'new-council') {
+    pageContent = (
       <NewCouncilPage
         initialSelectedModels={draftModels}
         initialModeratorModel={draftModerator}
@@ -179,10 +244,8 @@ function AppRouter() {
         }}
       />
     );
-  }
-
-  if (route === 'council-room') {
-    return (
+  } else if (route === 'council-room') {
+    pageContent = (
       <CouncilRoomPage
         councilId={activeCouncilId}
         initialAutoPrompt={autoPrompt}
@@ -190,25 +253,35 @@ function AppRouter() {
         onNavigate={navigate}
       />
     );
+  } else if (route === 'history') {
+    pageContent = <HistoryPage onNavigate={navigate} />;
+  } else if (route === 'portal') {
+    pageContent = <UserPortalPage onNavigate={navigate} />;
+  } else if (route === 'admin') {
+    pageContent = <AdminPortalPage onNavigate={navigate} />;
+  } else if (route === 'usage') {
+    pageContent = <UsageBillingPage onNavigate={navigate} />;
+  } else {
+    pageContent = <SettingsPage onNavigate={navigate} />;
   }
 
-  if (route === 'history') {
-    return <HistoryPage onNavigate={navigate} />;
-  }
-
-  if (route === 'portal') {
-    return <UserPortalPage onNavigate={navigate} />;
-  }
-
-  if (route === 'admin') {
-    return <AdminPortalPage onNavigate={navigate} />;
-  }
-
-  if (route === 'usage') {
-    return <UsageBillingPage onNavigate={navigate} />;
-  }
-
-  return <SettingsPage onNavigate={navigate} />;
+  return (
+    <>
+      {pageContent}
+      <PremiumPromoModal
+        open={promoOpen}
+        onUpgrade={() => {
+          markPromoSeen();
+          setPromoOpen(false);
+          navigate('premium');
+        }}
+        onDismiss={() => {
+          markPromoSeen();
+          setPromoOpen(false);
+        }}
+      />
+    </>
+  );
 }
 
 export default function App() {

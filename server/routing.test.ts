@@ -11,6 +11,7 @@ import type {
   PreflightReport,
   ProviderId,
 } from '../src/shared/types.ts';
+import { buildChatGptAliasModelInfo, pickBestGeminiFlashLiteModelId } from './chatgptAlias.ts';
 import { inferModelTier, probeSingleModel } from './modelCatalogService.ts';
 import {
   classifyProviderError,
@@ -2661,7 +2662,147 @@ async function runTests() {
     }
   }
 
-  console.log('All 24 Provider Availability, Groq, Reply, Reactions, Premium Priority & T.U.T. Wallet Config scenarios passed.');
+  // Scenario 25: ChatGPT -> Gemini Flash Lite alias execution, multi-seat cycling, and shared-API model privacy redaction
+  {
+    const uid = 'test_scenario_25_chatgpt_alias_and_privacy';
+    clearProviderHealth(uid, 'google');
+    clearProviderHealth(uid, 'openai');
+
+    assert.equal(
+      pickBestGeminiFlashLiteModelId([
+        { modelId: 'gemini-2.5-pro' },
+        { modelId: 'gemini-2.5-flash-lite' },
+        { modelId: 'gemini-3.5-flash-lite' },
+      ]),
+      'gemini-3.5-flash-lite',
+    );
+    assert.equal(
+      pickBestGeminiFlashLiteModelId([
+        { modelId: 'gemini-2.5-flash' },
+        { modelId: 'gemini-2.5-flash-lite' },
+      ]),
+      'gemini-2.5-flash-lite',
+    );
+
+    const pool: ModelInfo[] = [
+      buildChatGptAliasModelInfo(1),
+      makeModel('google', 'gemini-3.5-flash-lite', { availabilityState: 'inference_ready' }),
+      makeModel('google', 'gemini-2.5-flash', { availabilityState: 'inference_ready' }),
+    ];
+    const states = makeProviderStates({
+      openai: { connected: true, healthState: 'inference_ready', message: null, discoveredCount: 1, inferenceReadyCount: 1 },
+      google: { connected: true, healthState: 'inference_ready', message: null, discoveredCount: 2, inferenceReadyCount: 2 },
+      anthropic: { connected: false, healthState: 'disconnected', message: null, discoveredCount: 0, inferenceReadyCount: 0 },
+    });
+
+    const smartMasked = await smartSelectModels({
+      uid,
+      idToken: 'tok',
+      prompt: 'Compare vector indexing options',
+      mode: 'free',
+      intelligenceLevel: 'low',
+      preferredProviders: ['openai', 'google'],
+      seatCount: 4,
+      isPremium: true,
+      maskAdminSharedModels: true,
+      runPreflightFn: async () => ({
+        ok: true,
+        checkedAt: new Date().toISOString(),
+        readyModels: pool,
+        rejectedModels: [],
+        providerStates: states,
+        warnings: [],
+      }),
+    });
+
+    assert.equal(smartMasked.selectedModels.length, 4);
+    assert.deepEqual(smartMasked.selectedModels, [
+      'openai:chatgpt-1',
+      'google:managed-2',
+      'openai:chatgpt-3',
+      'google:managed-4',
+    ]);
+    assert.ok(!smartMasked.rationale.includes('gemini-3.5-flash-lite'), 'Rationale must not leak raw Admin model ID');
+    assert.ok(!smartMasked.rationale.includes('gemini-2.5-flash'), 'Rationale must not leak raw Admin model ID');
+
+    const seenCalls: Array<{ provider: ProviderId; modelId: string }> = [];
+    const events: CouncilSSEEvent[] = [];
+
+    await runCouncilEngine({
+      uid,
+      idToken: 'tok',
+      councilId: 'c_chatgpt_alias',
+      mode: 'chat',
+      intelligenceLevel: 'low',
+      isPremium: true,
+      maskModelDetails: true,
+      enableFallback: false,
+      selectedModels: ['openai:chatgpt-1', 'google:managed-2'],
+      moderatorModel: 'none',
+      maxRounds: 1,
+      startRound: 0,
+      priorMessages: [],
+      userPrompt: 'Say hello to the council.',
+      emit: (e) => events.push(e),
+      deps: {
+        retryDelayMs: 1,
+        turnDelayMs: 1,
+        resolveKey: async (_u, _t, pid) => (pid === 'google' ? 'admin-google-key' : null),
+        getCatalog: async () => ({
+          models: pool,
+          discoveryErrors: {},
+          warnings: [],
+          providerStates: states,
+        }),
+        runPreflight: async () => ({
+          ok: true,
+          checkedAt: new Date().toISOString(),
+          readyModels: [
+            buildChatGptAliasModelInfo(1),
+            { ...makeModel('google', 'managed-2'), compositeId: 'google:managed-2' },
+          ],
+          rejectedModels: [],
+          providerStates: states,
+          warnings: [],
+        }),
+        invokeStream: async ({ provider, modelId, onDelta }) => {
+          seenCalls.push({ provider, modelId });
+          onDelta('Hello from council seat!');
+          return {
+            content: 'Hello from council seat!',
+            inputTokens: 15,
+            outputTokens: 6,
+            latencyMs: 20,
+            estimatedCostUsd: 0,
+            pricingKnown: true,
+            stopped: false,
+          };
+        },
+      },
+    });
+
+    assert.equal(seenCalls.length, 2);
+    assert.equal(seenCalls[0].provider, 'google', 'ChatGPT alias seat must execute via Google Gemini');
+    assert.equal(seenCalls[0].modelId, 'gemini-3.5-flash-lite');
+    assert.equal(seenCalls[1].provider, 'google');
+
+    const doneEvents = events.filter(
+      (e): e is Extract<CouncilSSEEvent, { type: 'model_done' }> => e.type === 'model_done',
+    );
+    assert.equal(doneEvents.length, 2);
+    assert.equal(doneEvents[0].provider, 'openai');
+    assert.equal(doneEvents[0].modelLabel, 'ChatGPT');
+    assert.equal(doneEvents[0].modelId, 'chatgpt-1');
+    assert.equal(doneEvents[1].provider, 'google');
+    assert.equal(doneEvents[1].modelLabel, 'Google Gemini');
+    assert.equal(doneEvents[1].modelId, 'managed-2');
+    for (const ev of doneEvents) {
+      assert.ok(!ev.modelId.includes('gemini-'), 'SSE event must never leak underlying Admin model ID');
+      assert.ok(!ev.modelLabel.includes('gemini-'), 'SSE label must never leak underlying Admin model ID');
+    }
+  }
+
+  console.log('All 25 Provider Availability, Groq, Reply, Reactions, Premium Priority, T.U.T. Wallet & ChatGPT Alias scenarios passed.');
 }
 
 runTests().catch((err) => {

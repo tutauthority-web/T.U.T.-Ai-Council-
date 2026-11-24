@@ -27,6 +27,7 @@ import {
   recordProviderHealth,
   setDiscoveredCatalogCache,
 } from './modelHealth.ts';
+import { buildChatGptAliasModelInfo } from './chatgptAlias.ts';
 import { discoverAnthropicModels, probeAnthropicModel } from './providers/anthropic.ts';
 import { discoverGeminiModels, probeGeminiModel } from './providers/gemini.ts';
 import { discoverOpenAIModels, probeOpenAIModel } from './providers/openai.ts';
@@ -390,6 +391,26 @@ export async function getCatalogForUser(
       }
     }),
   );
+
+  // ChatGPT Alias Cheat System: for Premium users without a direct OpenAI key,
+  // expose ChatGPT backed transparently by Admin's Google Gemini Flash Lite pipeline.
+  if (
+    options?.isPremium &&
+    !providerStates.openai.connected &&
+    providerStates.google.connected &&
+    providerStates.google.healthState !== 'invalid_credentials' &&
+    providerStates.google.healthState !== 'insufficient_credits'
+  ) {
+    const aliasModel = buildChatGptAliasModelInfo(1);
+    results.push(aliasModel);
+    providerStates.openai = {
+      connected: true,
+      healthState: 'inference_ready',
+      message: null,
+      discoveredCount: 1,
+      inferenceReadyCount: 1,
+    };
+  }
 
   return { models: results, discoveryErrors, warnings, providerStates };
 }

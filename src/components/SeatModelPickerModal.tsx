@@ -15,7 +15,12 @@ import {
   sortModelsForPicker,
   type ModelAccessFilter,
 } from '../lib/modelSelection';
-import { isModelFreeTier, PROVIDER_IDS, PROVIDER_REGISTRY } from '../shared/providers';
+import {
+  formatParticipantDisplayLabel,
+  isModelFreeTier,
+  PROVIDER_IDS,
+  PROVIDER_REGISTRY,
+} from '../shared/providers';
 import type {
   IntelligenceLevel,
   ModelInfo,
@@ -35,6 +40,7 @@ interface SeatModelPickerModalProps {
   connections: ProviderConnectionSummary[];
   intelligenceLevel: IntelligenceLevel;
   unavailableSet?: Set<string>;
+  hideModelDetails?: boolean;
   onSelectModel: (compositeId: string) => void;
   onClose: () => void;
   onNavigateConnections: () => void;
@@ -48,6 +54,7 @@ export function SeatModelPickerModal({
   connections,
   intelligenceLevel,
   unavailableSet,
+  hideModelDetails = false,
   onSelectModel,
   onClose,
   onNavigateConnections,
@@ -317,8 +324,14 @@ export function SeatModelPickerModal({
                     const modelId = info?.modelId || cid.split(':').slice(1).join(':');
                     const isThisSeat = idx === seatIndex;
                     const isFlagged = Boolean(unavailableSet?.has(cid));
-                    const shortName =
-                      info?.displayName || modelId.split('/').pop() || cid;
+                    const shortName = hideModelDetails
+                      ? formatParticipantDisplayLabel({
+                          provider: pid,
+                          modelId,
+                          modelLabel: info?.displayName,
+                          hideModelDetails: true,
+                        })
+                      : info?.displayName || modelId.split('/').pop() || cid;
                     return (
                       <span
                         key={`${idx}-${cid}`}
@@ -564,7 +577,14 @@ export function SeatModelPickerModal({
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-2 min-w-0">
                                   <span className="font-display text-sm font-semibold text-slate-100 truncate">
-                                    {m.displayName}
+                                    {hideModelDetails
+                                      ? formatParticipantDisplayLabel({
+                                          provider: m.provider,
+                                          modelId: m.modelId,
+                                          modelLabel: m.displayName,
+                                          hideModelDetails: true,
+                                        })
+                                      : m.displayName}
                                   </span>
                                   {matchesTier && !isSelectedElsewhere && (
                                     <Sparkles className="w-3 h-3 text-blue-400 shrink-0" />
@@ -586,10 +606,14 @@ export function SeatModelPickerModal({
                                       <span className="tabular-nums">{ctx}</span>
                                     </>
                                   )}
-                                  <span aria-hidden="true">·</span>
-                                  <span className="font-mono text-slate-400 truncate max-w-[180px]">
-                                    {m.modelId}
-                                  </span>
+                                  {!hideModelDetails && (
+                                    <>
+                                      <span aria-hidden="true">·</span>
+                                      <span className="font-mono text-slate-400 truncate max-w-[180px]">
+                                        {m.modelId}
+                                      </span>
+                                    </>
+                                  )}
                                 </div>
                               </div>
                             </div>

@@ -1,5 +1,11 @@
 import { Scale, User } from 'lucide-react';
-import { isValidProviderId, PROVIDER_REGISTRY } from '../shared/providers';
+import {
+  formatParticipantDisplayLabel,
+  isChatGptAliasModelId,
+  isManagedSeatModelId,
+  isValidProviderId,
+  PROVIDER_REGISTRY,
+} from '../shared/providers';
 import type { MessageReaction, ProviderId } from '../shared/types';
 
 export interface ProviderVisualStyle {
@@ -430,33 +436,35 @@ function ModelFamilyMark({
     case 'gemini':
     case 'google':
       return (
-        <svg viewBox="0 0 16 16" className={iconClass} fill="currentColor" aria-hidden="true">
-          <path d="M8 1.2C8.4 4.8 11.2 7.6 14.8 8C11.2 8.4 8.4 11.2 8 14.8C7.6 11.2 4.8 8.4 1.2 8C4.8 7.6 7.6 4.8 8 1.2Z" />
+        <svg viewBox="0 0 24 24" className={iconClass} fill="currentColor" aria-hidden="true">
+          <path d="M12 2C12.7 7.1 16.9 11.3 22 12C16.9 12.7 12.7 16.9 12 22C11.3 16.9 7.1 12.7 2 12C7.1 11.3 11.3 7.1 12 2Z" />
         </svg>
       );
     case 'gpt':
     case 'openai':
       return (
-        <svg viewBox="0 0 16 16" className={iconClass} fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
-          <polygon points="8,1.8 13.4,4.9 13.4,11.1 8,14.2 2.6,11.1 2.6,4.9" strokeLinejoin="round" />
-          <circle cx="8" cy="8" r="2.1" fill="currentColor" stroke="none" />
+        <svg viewBox="0 0 24 24" className={iconClass} fill="currentColor" aria-hidden="true">
+          <path d="M22.28 9.82a5.98 5.98 0 0 0-.52-4.91 6.05 6.05 0 0 0-6.51-2.9A6.07 6.07 0 0 0 4.98 4.18a5.98 5.98 0 0 0-4 2.9 6.05 6.05 0 0 0 .74 7.1 5.98 5.98 0 0 0 .51 4.91 6.05 6.05 0 0 0 6.51 2.9 5.98 5.98 0 0 0 4.5 2.01 6.06 6.06 0 0 0 5.77-4.21 5.99 5.99 0 0 0 4-2.9 6.06 6.06 0 0 0-.73-7.07ZM13.26 22.43a4.48 4.48 0 0 1-2.88-1.04l.14-.08 4.78-2.76a.79.79 0 0 0 .39-.68v-6.74l2.02 1.17c.02.01.03.03.03.05v5.58a4.5 4.5 0 0 1-4.48 4.5Zm-9.66-4.12a4.47 4.47 0 0 1-.54-3.01l.14.08 4.78 2.76a.77.77 0 0 0 .78 0l5.84-3.37v2.33a.08.08 0 0 1-.03.06L9.74 19.95a4.5 4.5 0 0 1-6.14-1.64ZM2.34 7.9a4.49 4.49 0 0 1 2.37-1.97V11.6a.77.77 0 0 0 .39.68l5.81 3.35-2.02 1.17a.08.08 0 0 1-.07 0l-4.83-2.79A4.5 4.5 0 0 1 2.34 7.9Zm16.6 3.86L13.1 8.37l2.02-1.16a.08.08 0 0 1 .07 0l4.83 2.79a4.49 4.49 0 0 1-.68 8.1v-5.68a.79.79 0 0 0-.4-.66Zm2.01-3.02-.14-.08-4.77-2.78a.78.78 0 0 0-.79 0L9.41 9.23V6.9a.07.07 0 0 1 .03-.06l4.83-2.79a4.5 4.5 0 0 1 6.68 4.66ZM8.31 12.86l-2.02-1.16a.08.08 0 0 1-.03-.06V6.07a4.5 4.5 0 0 1 7.38-3.45l-.14.08L8.7 5.46a.79.79 0 0 0-.39.68v6.72Zm1.1-2.36 2.6-1.5 2.6 1.5v3l-2.6 1.5-2.6-1.5v-3Z" />
         </svg>
       );
     case 'claude':
     case 'anthropic':
       return (
-        <svg viewBox="0 0 16 16" className={iconClass} fill="currentColor" aria-hidden="true">
-          <path d="M7.1 2.5L2.4 13.5H4.4L5.4 11H9.1L10.1 13.5H12.1L7.4 2.5H7.1ZM6.1 9.2L7.25 6.2L8.4 9.2H6.1ZM10.1 2.5L13.5 13.5H11.9L8.6 2.5H10.1Z" />
+        <svg viewBox="0 0 24 24" className={iconClass} fill="currentColor" aria-hidden="true">
+          <path d="M13.83 4.2h2.76L21 19.8h-2.82l-1.03-3.55h-4.73l-.92 3.55H8.78L13.83 4.2Zm-1.46 9.57h3.95l-1.92-6.52-2.03 6.52ZM6.68 4.2h2.66L13.8 19.8h-2.74L6.68 4.2Z" />
+          <path d="M5.2 4.2h2.62L3.3 19.8H.62L5.2 4.2Z" opacity="0.88" />
         </svg>
       );
     case 'mistral':
       return (
-        <svg viewBox="0 0 16 16" className={iconClass} fill="currentColor" aria-hidden="true">
-          <rect x="2.2" y="3" width="2.3" height="10" rx="0.5" />
-          <rect x="11.5" y="3" width="2.3" height="10" rx="0.5" />
-          <rect x="4.9" y="5.2" width="2.2" height="2.4" rx="0.4" />
-          <rect x="8.9" y="5.2" width="2.2" height="2.4" rx="0.4" />
-          <rect x="6.9" y="7.8" width="2.2" height="2.6" rx="0.4" />
+        <svg viewBox="0 0 24 24" className={iconClass} fill="currentColor" aria-hidden="true">
+          <rect x="3" y="4" width="3.4" height="16" rx="0.6" />
+          <rect x="17.6" y="4" width="3.4" height="16" rx="0.6" />
+          <rect x="6.9" y="7.5" width="3.4" height="3.6" rx="0.5" />
+          <rect x="13.7" y="7.5" width="3.4" height="3.6" rx="0.5" />
+          <rect x="10.3" y="11.2" width="3.4" height="3.8" rx="0.5" />
+          <rect x="3" y="16.4" width="5.2" height="3.6" rx="0.5" />
+          <rect x="15.8" y="16.4" width="5.2" height="3.6" rx="0.5" />
         </svg>
       );
     case 'kimi':
@@ -475,9 +483,10 @@ function ModelFamilyMark({
       );
     case 'nemotron':
       return (
-        <svg viewBox="0 0 16 16" className={iconClass} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
-          <path d="M2 8C3.8 4.8 6 3.5 8 3.5C10 3.5 12.2 4.8 14 8C12.2 11.2 10 12.5 8 12.5C6 12.5 3.8 11.2 2 8Z" />
-          <circle cx="8" cy="8" r="2" fill="currentColor" stroke="none" />
+        <svg viewBox="0 0 24 24" className={iconClass} fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M2.5 12C5.2 7.2 8.4 5.2 12 5.2C15.6 5.2 18.8 7.2 21.5 12C18.8 16.8 15.6 18.8 12 18.8C8.4 18.8 5.2 16.8 2.5 12Z" />
+          <path d="M8.5 12A3.5 3.5 0 1 1 12 15.5" />
+          <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
         </svg>
       );
     case 'hermes':
@@ -507,10 +516,10 @@ function ModelFamilyMark({
       );
     case 'cohere':
       return (
-        <svg viewBox="0 0 16 16" className={iconClass} fill="currentColor" aria-hidden="true">
-          <circle cx="5.4" cy="6.2" r="2.6" />
-          <circle cx="10.8" cy="5.2" r="1.9" />
-          <path d="M5.4 9.8C7.8 9.8 11.4 9.2 12.6 11.4C13.4 12.8 11.2 13.8 8 13.8C5 13.8 3.2 12.4 3.4 10.9C3.5 10.1 4.4 9.8 5.4 9.8Z" />
+        <svg viewBox="0 0 24 24" className={iconClass} fill="currentColor" aria-hidden="true">
+          <path d="M7.6 4.2C4.9 4.2 3 6.2 3 8.9c0 2.5 1.8 4.4 4.3 4.4 2.8 0 4.5-1.9 4.5-4.4 0-2.7-1.6-4.7-4.2-4.7Z" />
+          <path d="M16.9 4.6c-2.2 0-3.8 1.5-3.8 3.6s1.6 3.6 3.8 3.6c2.3 0 4.1-1.5 4.1-3.6s-1.8-3.6-4.1-3.6Z" />
+          <path d="M8.5 14.5c-2.9 0-5.1 1.4-5.1 3.3 0 1.7 2 2.9 5.3 2.9 3.7 0 8.5-.7 11-2.2 1.2-.7 1.4-2.2.3-3.1-1.3-1-3.7-.9-6.2-.9H8.5Z" />
         </svg>
       );
     case 'sarvam':
@@ -568,6 +577,22 @@ function ModelFamilyMark({
   }
 }
 
+export function ProviderLogoMark({
+  provider,
+  className = 'w-5 h-5',
+}: {
+  provider: ProviderId;
+  className?: string;
+}) {
+  return (
+    <ProviderMark
+      provider={provider}
+      role="model"
+      iconClass={className}
+    />
+  );
+}
+
 function ProviderMark({
   provider,
   role,
@@ -588,9 +613,8 @@ function ProviderMark({
     return <User className={iconClass} />;
   }
 
-  if (useModelLogo && modelId) {
+  if (useModelLogo && modelId && !isManagedSeatModelId(modelId)) {
     const family = detectModelFamily(provider, modelId);
-    // If same provider family (e.g. second Google Gemini model or second OpenAI model), pick a distinct geometric mark
     const sameAsProvider =
       (provider === 'google' && family === 'gemini') ||
       (provider === 'openai' && family === 'gpt') ||
@@ -616,24 +640,27 @@ function ProviderMark({
       return <ModelFamilyMark family="claude" iconClass={iconClass} />;
     case 'groq':
       return (
-        <svg viewBox="0 0 16 16" className={iconClass} fill="currentColor" aria-hidden="true">
-          <path d="M9.2 1.5L3.6 8.8H7.7L6.8 14.5L12.4 7.2H8.3L9.2 1.5Z" />
+        <svg viewBox="0 0 24 24" className={iconClass} fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <circle cx="11.2" cy="11.2" r="6.8" />
+          <path d="M13.5 13.5L20 20" />
+          <path d="M11.8 7.6L9.4 11.4H13L10.8 14.9" strokeWidth="1.9" />
         </svg>
       );
     case 'openrouter':
       return (
-        <svg viewBox="0 0 16 16" className={iconClass} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">
-          <circle cx="3.5" cy="8" r="1.6" fill="currentColor" stroke="none" />
-          <circle cx="12.2" cy="4.2" r="1.5" fill="currentColor" stroke="none" />
-          <circle cx="12.2" cy="11.8" r="1.5" fill="currentColor" stroke="none" />
-          <path d="M5 8C7.5 8 8 4.2 10.7 4.2M5 8C7.5 8 8 11.8 10.7 11.8" />
+        <svg viewBox="0 0 24 24" className={iconClass} fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" aria-hidden="true">
+          <circle cx="5" cy="12" r="2.4" fill="currentColor" stroke="none" />
+          <circle cx="18.5" cy="6.2" r="2.2" fill="currentColor" stroke="none" />
+          <circle cx="18.5" cy="17.8" r="2.2" fill="currentColor" stroke="none" />
+          <path d="M7.2 12C11.5 12 12.2 6.2 16.3 6.2M7.2 12C11.5 12 12.2 17.8 16.3 17.8" />
         </svg>
       );
     case 'cerebras':
       return (
-        <svg viewBox="0 0 16 16" className={iconClass} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
-          <rect x="4.5" y="4.5" width="7" height="7" rx="1.6" />
-          <path d="M8 2V4.5M8 11.5V14M2 8H4.5M11.5 8H14" />
+        <svg viewBox="0 0 24 24" className={iconClass} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect x="6.5" y="6.5" width="11" height="11" rx="2.4" />
+          <rect x="9.8" y="9.8" width="4.4" height="4.4" rx="1" fill="currentColor" stroke="none" />
+          <path d="M9.5 3V6.5M14.5 3V6.5M9.5 17.5V21M14.5 17.5V21M3 9.5H6.5M3 14.5H6.5M17.5 9.5H21M17.5 14.5H21" />
         </svg>
       );
     case 'mistral':
@@ -642,24 +669,25 @@ function ProviderMark({
       return <ModelFamilyMark family="nemotron" iconClass={iconClass} />;
     case 'sambanova':
       return (
-        <svg viewBox="0 0 16 16" className={iconClass} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M11.2 4.2C9.8 2.8 6.4 2.8 5.2 4.5C4.2 6 6.1 7.2 8.2 7.9C10.5 8.7 11.8 10 10.7 11.7C9.4 13.4 5.9 13.3 4.5 11.8" />
+        <svg viewBox="0 0 24 24" className={iconClass} fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M17.2 6.4C15.1 4.2 9.6 4.2 7.8 6.8C6.2 9.1 9.1 10.9 12.3 12C15.8 13.2 17.8 15.1 16.1 17.6C14.1 20.2 8.7 20 6.6 17.8" />
         </svg>
       );
     case 'huggingface':
       return (
-        <svg viewBox="0 0 16 16" className={iconClass} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
-          <circle cx="8" cy="8" r="5.4" />
-          <circle cx="6.2" cy="7" r="0.85" fill="currentColor" stroke="none" />
-          <circle cx="9.8" cy="7" r="0.85" fill="currentColor" stroke="none" />
-          <path d="M5.6 9.6C6.4 10.9 9.6 10.9 10.4 9.6" />
+        <svg viewBox="0 0 24 24" className={iconClass} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+          <circle cx="12" cy="11.5" r="7.6" />
+          <circle cx="9.4" cy="10.2" r="1.2" fill="currentColor" stroke="none" />
+          <circle cx="14.6" cy="10.2" r="1.2" fill="currentColor" stroke="none" />
+          <path d="M8.6 13.8C9.8 15.6 14.2 15.6 15.4 13.8" />
+          <path d="M4.4 16.5C5.6 15.5 6.8 16.2 7.2 17.8M19.6 16.5C18.4 15.5 17.2 16.2 16.8 17.8" />
         </svg>
       );
     case 'together':
       return (
-        <svg viewBox="0 0 16 16" className={iconClass} fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
-          <circle cx="6" cy="8" r="3.6" />
-          <circle cx="10" cy="8" r="3.6" />
+        <svg viewBox="0 0 24 24" className={iconClass} fill="none" stroke="currentColor" strokeWidth="2.1" aria-hidden="true">
+          <circle cx="9.2" cy="12" r="5.2" />
+          <circle cx="14.8" cy="12" r="5.2" />
         </svg>
       );
     case 'cohere':
@@ -767,23 +795,31 @@ export function ProviderAttributionLine({
   provider,
   modelId,
   role,
+  hideModelDetails = false,
 }: {
   provider: ProviderId | 'user';
   modelId: string;
   role: 'user' | 'model' | 'moderator';
+  hideModelDetails?: boolean;
 }) {
   const style = getProviderVisual(provider);
+  const isChatGpt = isChatGptAliasModelId(modelId);
+  const hideChip = hideModelDetails || isManagedSeatModelId(modelId);
+  const displayName = isChatGpt ? 'ChatGPT' : style.name;
+
   return (
     <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm">
       <span
         className="font-bold font-display tracking-tight"
         style={{ color: role === 'moderator' ? '#F6C453' : style.accentHex }}
       >
-        {style.name}
+        {displayName}
       </span>
-      <span className="font-mono text-xs px-2.5 py-0.5 rounded-full bg-white/[0.04] border border-white/12 text-[#B4BFD4] max-w-[260px] truncate">
-        {modelId}
-      </span>
+      {!hideChip && (
+        <span className="font-mono text-xs px-2.5 py-0.5 rounded-full bg-white/[0.04] border border-white/12 text-[#B4BFD4] max-w-[260px] truncate">
+          {formatParticipantDisplayLabel({ provider, modelId })}
+        </span>
+      )}
       {role === 'moderator' && (
         <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-gradient-to-r from-amber-400/20 to-blue-400/20 border border-amber-300/35 text-amber-200">
           <Scale className="w-3 h-3 text-amber-300" />

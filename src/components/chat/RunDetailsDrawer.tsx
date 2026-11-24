@@ -1,12 +1,26 @@
 import { ArrowRightLeft, ShieldAlert, ShieldCheck, UserMinus, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { formatStatusLabel } from '../../lib/statusLabels';
+import { formatParticipantDisplayLabel, isValidProviderId } from '../../shared/providers';
+import type { ProviderId } from '../../shared/types';
 import type {
   FallbackRecord,
   PreflightViewState,
   ProviderErrorRecord,
   RemovedModelRecord,
 } from './types';
+
+function formatCompositeSafe(compositeId: string, hideModelDetails: boolean): string {
+  const idx = compositeId.indexOf(':');
+  const rawProvider = idx === -1 ? 'google' : compositeId.slice(0, idx);
+  const modelId = idx === -1 ? compositeId : compositeId.slice(idx + 1);
+  const provider: ProviderId = isValidProviderId(rawProvider) ? rawProvider : 'google';
+  return formatParticipantDisplayLabel({
+    provider,
+    modelId,
+    hideModelDetails,
+  });
+}
 
 export function RunDetailsDrawer({
   open,
@@ -15,6 +29,7 @@ export function RunDetailsDrawer({
   fallbackHistory,
   persistedErrors,
   removedModels = [],
+  hideModelDetails = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -22,6 +37,7 @@ export function RunDetailsDrawer({
   fallbackHistory: FallbackRecord[];
   persistedErrors: ProviderErrorRecord[];
   removedModels?: RemovedModelRecord[];
+  hideModelDetails?: boolean;
 }) {
   const hasAny =
     Boolean(preflightState?.readyModels.length) ||
@@ -66,7 +82,14 @@ export function RunDetailsDrawer({
               <p className="text-emerald-300 flex items-start gap-2">
                 <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5" />
                 <span>
-                  Verified: <span className="font-mono text-emerald-200">{preflightState.readyModels.join(', ')}</span>
+                  Verified:{' '}
+                  <span className="font-mono text-emerald-200">
+                    {preflightState.readyModels
+                      .map((cid) =>
+                        hideModelDetails ? formatCompositeSafe(cid, true) : cid,
+                      )
+                      .join(', ')}
+                  </span>
                 </span>
               </p>
             )}
@@ -75,8 +98,15 @@ export function RunDetailsDrawer({
               <div className="space-y-1 text-amber-200 pt-1.5 border-t border-white/10">
                 {preflightState.rejectedModels.map((r) => (
                   <p key={`preflight-${r.compositeId}`}>
-                    Rejected <span className="font-mono">{r.compositeId}</span> (
-                    {r.errorCategory || formatStatusLabel(r.availabilityState)}): {r.reason}
+                    Rejected{' '}
+                    <span className="font-mono">
+                      {formatParticipantDisplayLabel({
+                        provider: r.provider,
+                        modelId: r.modelId,
+                        hideModelDetails,
+                      })}
+                    </span>{' '}
+                    ({r.errorCategory || formatStatusLabel(r.availabilityState)}): {r.reason}
                   </p>
                 ))}
               </div>
@@ -88,7 +118,15 @@ export function RunDetailsDrawer({
                   <p key={n.id} className="flex items-start gap-2 text-amber-200">
                     <ArrowRightLeft className="w-3.5 h-3.5 text-[#FFB454] shrink-0 mt-0.5" />
                     <span>
-                      [{n.errorCategory}] {n.originalModelLabel} → {n.fallbackModelLabel} ({n.reason})
+                      [{n.errorCategory}]{' '}
+                      {hideModelDetails
+                        ? formatCompositeSafe(n.originalCompositeId, true)
+                        : n.originalModelLabel}{' '}
+                      →{' '}
+                      {hideModelDetails
+                        ? formatCompositeSafe(n.fallbackCompositeId, true)
+                        : n.fallbackModelLabel}{' '}
+                      ({n.reason})
                     </span>
                   </p>
                 ))}
@@ -101,7 +139,11 @@ export function RunDetailsDrawer({
                   <p key={`removed-${rm.compositeId}`} className="flex items-start gap-2 text-amber-200">
                     <UserMinus className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
                     <span>
-                      Auto-removed unresponsive model <span className="font-mono text-amber-100">{rm.compositeId}</span>: {rm.reason}
+                      Auto-removed unresponsive seat{' '}
+                      <span className="font-mono text-amber-100">
+                        {formatCompositeSafe(rm.compositeId, hideModelDetails)}
+                      </span>
+                      : {rm.reason}
                     </span>
                   </p>
                 ))}
@@ -113,7 +155,13 @@ export function RunDetailsDrawer({
                 {persistedErrors.map((err) => (
                   <p key={err.id}>
                     <span className="font-mono">
-                      {err.provider}:{err.modelId}
+                      {hideModelDetails
+                        ? formatParticipantDisplayLabel({
+                            provider: isValidProviderId(err.provider) ? err.provider : 'google',
+                            modelId: err.modelId,
+                            hideModelDetails: true,
+                          })
+                        : `${err.provider}:${err.modelId}`}
                     </span>{' '}
                     ({err.errorCode}): {err.message}
                   </p>

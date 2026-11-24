@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
+  Check,
   CheckCircle2,
   Crown,
   KeyRound,
@@ -24,11 +25,12 @@ import { runPreflightApi, smartSelectModelsApi } from '../lib/apiClient';
 import { createCouncilRoom } from '../lib/firestoreService';
 import { pickQuickMixIds } from '../lib/modelSelection';
 import { formatStatusLabel } from '../lib/statusLabels';
-import { isModelFreeTier, PROVIDER_REGISTRY } from '../shared/providers';
+import { isModelFreeTier, PROVIDER_LIST, PROVIDER_REGISTRY } from '../shared/providers';
 import {
   PREMIUM_PROVIDER_PRIORITY,
   type DiscussionMode,
   type IntelligenceLevel,
+  type ProviderId,
 } from '../shared/types';
 
 const INTELLIGENCE_OPTIONS: Array<{
@@ -80,6 +82,10 @@ export function NewCouncilPage({
     refreshProviderState,
   } = useAuth();
 
+  // Streamlined Premium flow for non-admin Premium subscribers:
+  // select Seat Count + Providers (with real logos) only; no intelligence picker or raw model IDs.
+  const isStreamlinedPremium = isPremium && !isAdmin;
+
   const availableModels = useMemo(
     () =>
       models.filter(
@@ -98,7 +104,7 @@ export function NewCouncilPage({
     [models],
   );
 
-  const singleModelOnly = availableModels.length === 1;
+  const singleModelOnly = !isStreamlinedPremium && availableModels.length === 1;
   const minRequiredModels = singleModelOnly ? 1 : 2;
   const connectedProviders = connections.filter((c) => c.status === 'connected');
 
@@ -113,6 +119,42 @@ export function NewCouncilPage({
   const [intelligenceLevel, setIntelligenceLevel] = useState<IntelligenceLevel>('low');
   const [maxRounds, setMaxRounds] = useState(2);
   const [seatCount, setSeatCount] = useState<number>(initialCount);
+
+  // Streamlined Premium state: chosen providers cycled automatically across seats
+  const readyPremiumProviders = useMemo<ProviderId[]>(() => {
+    const connMap = new Map(connections.map((c) => [c.providerId, c]));
+    const readyIds = PROVIDER_LIST.map((p) => p.id).filter((pid) => {
+      const conn = connMap.get(pid);
+      return (
+        conn?.status === 'connected' ||
+        availableModels.some((m) => m.provider === pid)
+      );
+    });
+    const priorityRank = new Map<ProviderId, number>([
+      ['google', 0],
+      ['openai', 1],
+      ['groq', 2],
+      ['openrouter', 3],
+      ['cohere', 4],
+    ]);
+    return [...readyIds].sort(
+      (a, b) => (priorityRank.get(a) ?? 99) - (priorityRank.get(b) ?? 99),
+    );
+  }, [connections, availableModels]);
+
+  const [selectedProviders, setSelectedProviders] = useState<ProviderId[]>([]);
+
+  useEffect(() => {
+    if (!isStreamlinedPremium) return;
+    setSelectedProviders((prev) => {
+      const validPrev = prev.filter((pid) => readyPremiumProviders.includes(pid));
+      if (validPrev.length > 0) return validPrev;
+      const preferredOrder: ProviderId[] = ['google', 'openai', 'groq', 'openrouter', 'cohere'];
+      const defaults = preferredOrder.filter((pid) => readyPremiumProviders.includes(pid)).slice(0, 3);
+      return defaults.length > 0 ? defaults : readyPremiumProviders.slice(0, 3);
+    });
+  }, [isStreamlinedPremium, readyPremiumProviders]);
+
   const [manualCustomize, setManualCustomize] = useState<boolean>(
     initialSelectedModels.length > 0,
   );
@@ -136,7 +178,7 @@ export function NewCouncilPage({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Sync single-model constraint if only 1 model exists
+  // Sync single-model constraint if only 1 model exists (non-premium / BYOK)
   useEffect(() => {
     if (singleModelOnly) {
       if (mode !== 'chat') setMode('chat');
@@ -147,9 +189,15 @@ export function NewCouncilPage({
     }
   }, [singleModelOnly, mode, availableModels]);
 
-  // Premium Automatic Cycling Priority Seat Selection (Gemini -> Groq -> OpenRouter -> Cohere)
+  // Admin Premium Automatic Cycling Priority Seat Selection
   useEffect(() => {
-    if (!isPremium || manualCustomize || singleModelOnly || availableModels.length === 0) {
+    if (
+      !isPremium ||
+      isStreamlinedPremium ||
+      manualCustomize ||
+      singleModelOnly ||
+      availableModels.length === 0
+    ) {
       return;
     }
 
@@ -196,7 +244,16 @@ export function NewCouncilPage({
     return () => {
       cancelled = true;
     };
-  }, [isPremium, manualCustomize, singleModelOnly, availableModels.length, intelligenceLevel, seatCount, mode]);
+  }, [
+    isPremium,
+    isStreamlinedPremium,
+    manualCustomize,
+    singleModelOnly,
+    availableModels.length,
+    intelligenceLevel,
+    seatCount,
+    mode,
+  ]);
 
   const handleSeatCountChange = (nextCount: number) => {
     if (singleModelOnly) return;
@@ -212,6 +269,25 @@ export function NewCouncilPage({
     setError(null);
   };
 
+  const togglePremiumProvider = (pid: ProviderId) => {
+    setError(null);
+    setSelectedProviders((prev) => {
+      if (prev.includes(pid)) {
+        if (prev.length <= 1) return prev; // keep at least 1 provider active
+        return prev.filter((item) => item !== pid);
+      }
+      return [...prev, pid];
+    });
+  };
+
+  const previewSeatProviders = useMemo<ProviderId[]>(() => {
+    if (selectedProviders.length === 0) return [];
+    return Array.from(
+      { length: seatCount },
+      (_, idx) => selectedProviders[idx % selectedProviders.length],
+    );
+  }, [selectedProviders, seatCount]);
+
   const filledModels = useMemo(
     () => seatModels.filter((cid): cid is string => Boolean(cid)),
     [seatModels],
@@ -223,12 +299,12 @@ export function NewCouncilPage({
 
   // Keep moderatorModel synced with filled seats for Discussion / Debate
   useEffect(() => {
-    if (singleModelOnly || mode === 'chat') return;
+    if (isStreamlinedPremium || singleModelOnly || mode === 'chat') return;
     if (filledModels.length === 0) return;
     if (!moderatorModel || moderatorModel === 'none' || !filledModels.includes(moderatorModel)) {
       setModeratorModel(filledModels[0]);
     }
-  }, [singleModelOnly, mode, filledModels, moderatorModel]);
+  }, [isStreamlinedPremium, singleModelOnly, mode, filledModels, moderatorModel]);
 
   const unavailableSet = useMemo(
     () => new Set(Object.keys(unavailableReasons)),
@@ -362,6 +438,60 @@ export function NewCouncilPage({
     }
   };
 
+  const handleStreamlinedPremiumSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    setError(null);
+    if (selectedProviders.length === 0) {
+      setError('Select at least one AI provider to launch your council.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const hint = title.trim() || `${mode} council discussion`;
+      const result = await smartSelectModelsApi(hint, mode, 'low', {
+        seatCount,
+        preferredProviders: selectedProviders,
+      });
+
+      const resolvedSeats = result.selectedModels.slice(0, seatCount);
+      if (resolvedSeats.length < 2) {
+        setError('Could not allocate seats across the selected providers. Try selecting Google Gemini or Groq as well.');
+        setSubmitting(false);
+        return;
+      }
+
+      const resolvedMod =
+        mode === 'chat'
+          ? 'none'
+          : result.moderatorModel && resolvedSeats.includes(result.moderatorModel)
+            ? result.moderatorModel
+            : resolvedSeats[0];
+
+      const effectiveTitle =
+        title.trim() ||
+        (mode === 'chat'
+          ? 'Free Chat'
+          : mode === 'debate'
+            ? 'Debate Council'
+            : 'Discussion Council');
+
+      const council = await createCouncilRoom(user.uid, {
+        title: effectiveTitle,
+        mode,
+        intelligenceLevel: 'low',
+        selectedModels: resolvedSeats,
+        moderatorModel: resolvedMod,
+        maxRounds: mode === 'debate' ? 3 : mode === 'chat' ? 1 : maxRounds,
+      });
+      onCreatedAndStart(council.id, '');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setSubmitting(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
@@ -445,7 +575,7 @@ export function NewCouncilPage({
   };
 
   const activeIntelOption = INTELLIGENCE_OPTIONS.find((o) => o.id === intelligenceLevel);
-  const isPremiumAutoMode = isPremium && !manualCustomize && !singleModelOnly;
+  const isPremiumAutoMode = isPremium && !isStreamlinedPremium && !manualCustomize && !singleModelOnly;
 
   return (
     <AppShell
@@ -464,7 +594,7 @@ export function NewCouncilPage({
               {isAdmin
                 ? 'Open Connections → Admin Shared Pool to connect Gemini, Groq, OpenRouter, or Cohere keys for Premium and workspace councils.'
                 : isPremium
-                  ? 'Admin shared APIs are currently offline or have not discovered models yet. You can refresh status or optionally connect a personal API key under Connections.'
+                  ? 'Admin shared APIs are currently offline or have not synced yet. Refresh status or connect a personal key under Connections.'
                   : `Connect at least one API key across ${connectedProviders.length} active ${
                       connectedProviders.length === 1 ? 'provider' : 'providers'
                     } — or upgrade to Premium to use Admin-connected APIs immediately.`}
@@ -500,7 +630,243 @@ export function NewCouncilPage({
             </button>
           </div>
         </div>
+      ) : isStreamlinedPremium ? (
+        /* Streamlined Premium Council Launcher: Seat Count + Real-Logo Providers ONLY */
+        <form onSubmit={handleStreamlinedPremiumSubmit} className="max-w-3xl space-y-6 animate-panel-enter">
+          <div className="bg-[#121A2F] border border-amber-500/35 rounded-2xl px-4 py-3.5 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <Crown className="w-4 h-4 text-amber-400 shrink-0" />
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-amber-200 truncate">
+                  Premium Instant Council · Auto-Orchestrated
+                </p>
+                <p className="text-[11px] text-slate-400 truncate">
+                  Choose your seat count and AI providers — everything else is configured automatically.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* 1. Council Name */}
+          <section className="space-y-1.5">
+            <label htmlFor="council-title" className="block text-xs font-medium text-slate-300">
+              Council Name
+            </label>
+            <input
+              id="council-title"
+              type="text"
+              maxLength={120}
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Name or topic (optional)"
+              className="w-full min-h-[44px] px-3.5 py-2.5 text-sm bg-[#111827] border border-slate-800 focus:border-blue-500 rounded-xl text-slate-100 placeholder-slate-500 focus:outline-none transition-colors"
+            />
+          </section>
+
+          {/* 2. Council Type */}
+          <section className="space-y-2.5">
+            <span className="text-xs font-medium text-slate-300 block">Council Type</span>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              {COUNCIL_TYPES.map((t) => {
+                const active = mode === t.id;
+                return (
+                  <motion.button
+                    key={t.id}
+                    type="button"
+                    whileTap={!prefersReduced ? { scale: 0.985 } : undefined}
+                    onClick={() => setMode(t.id)}
+                    className={`min-h-[58px] text-left px-4 py-3 rounded-xl border transition-colors cursor-pointer ${
+                      active
+                        ? 'bg-blue-950/40 border-blue-500/65 text-slate-100'
+                        : 'bg-[#111827] border-slate-800 hover:border-slate-700 text-slate-300'
+                    }`}
+                  >
+                    <p className="font-display text-sm font-semibold text-slate-100">{t.label}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">{t.hint}</p>
+                  </motion.button>
+                );
+              })}
+            </div>
+
+            {mode === 'free' && (
+              <div className="pt-1 flex items-center justify-between gap-3 px-1">
+                <span className="text-xs text-slate-400">Discussion rounds</span>
+                <div className="flex items-center gap-1 p-1 bg-[#111827] border border-slate-800 rounded-lg">
+                  {[1, 2, 3, 4, 5, 6]
+                    .filter((n) => n <= (profile?.maxRoundsLimit || 6))
+                    .map((n) => (
+                      <button
+                        key={n}
+                        type="button"
+                        onClick={() => setMaxRounds(n)}
+                        className={`w-8 h-8 text-xs font-medium rounded-md tabular-nums transition-colors cursor-pointer ${
+                          maxRounds === n
+                            ? 'bg-blue-600 text-white'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        {n}
+                      </button>
+                    ))}
+                </div>
+              </div>
+            )}
+          </section>
+
+          {/* 3. Council Seats */}
+          <section className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <span className="text-xs font-medium text-slate-300 block">Council Seats</span>
+                <span className="text-[11px] text-slate-400">
+                  How many AI participants join this room
+                </span>
+              </div>
+              <div
+                className="flex items-center gap-1 p-1 bg-[#111827] border border-slate-800 rounded-xl"
+                role="group"
+                aria-label="Number of council seats"
+              >
+                {SEAT_COUNT_OPTIONS.map((count) => {
+                  const active = seatCount === count;
+                  return (
+                    <button
+                      key={count}
+                      type="button"
+                      onClick={() => handleSeatCountChange(count)}
+                      className={`w-9 h-9 text-xs font-semibold rounded-lg tabular-nums transition-colors cursor-pointer ${
+                        active
+                          ? 'bg-blue-600 text-white'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      {count}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
+
+          {/* 4. Select AI Providers (Real Brand Logos) */}
+          <section className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <span className="text-xs font-medium text-slate-300 block">
+                  Select AI Providers
+                </span>
+                <span className="text-[11px] text-slate-400">
+                  Selected providers are automatically distributed across your {seatCount} seats
+                </span>
+              </div>
+              <span className="text-xs font-medium text-blue-400 tabular-nums shrink-0">
+                {selectedProviders.length} active
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {readyPremiumProviders.map((pid) => {
+                const cfg = PROVIDER_REGISTRY[pid];
+                const isSelected = selectedProviders.includes(pid);
+                const label = pid === 'openai' ? 'ChatGPT' : cfg.name;
+                return (
+                  <motion.button
+                    key={pid}
+                    type="button"
+                    whileTap={!prefersReduced ? { scale: 0.98 } : undefined}
+                    onClick={() => togglePremiumProvider(pid)}
+                    className={`relative rounded-xl border p-3.5 text-left flex items-center gap-3 transition-colors cursor-pointer ${
+                      isSelected
+                        ? 'bg-blue-950/35 border-blue-500/65 text-slate-100'
+                        : 'bg-[#111827] border-slate-800 hover:border-slate-700 text-slate-300'
+                    }`}
+                  >
+                    <ProviderAvatar provider={pid} size="sm" />
+                    <div className="min-w-0 flex-1">
+                      <p className="font-display text-sm font-semibold truncate">{label}</p>
+                      <p className="text-[11px] text-slate-400 truncate">
+                        {isSelected ? 'Included' : 'Tap to add'}
+                      </p>
+                    </div>
+                    <span
+                      className={`w-5 h-5 rounded-full flex items-center justify-center border shrink-0 ${
+                        isSelected
+                          ? 'bg-blue-600 border-blue-400 text-white'
+                          : 'border-slate-700 bg-[#090E1A]'
+                      }`}
+                    >
+                      {isSelected && <Check className="w-3 h-3" />}
+                    </span>
+                  </motion.button>
+                );
+              })}
+            </div>
+
+            {/* Clean Seat Distribution Preview (Provider Logo + Name Only — zero model IDs) */}
+            {previewSeatProviders.length > 0 && (
+              <div className="bg-[#111827] border border-slate-800 rounded-xl p-3.5 space-y-2.5">
+                <p className="text-[11px] font-medium text-slate-400">
+                  Automatic Seat Lineup ({seatCount} seats)
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {previewSeatProviders.map((pid, idx) => {
+                    const label = pid === 'openai' ? 'ChatGPT' : PROVIDER_REGISTRY[pid].shortName;
+                    return (
+                      <div
+                        key={`${pid}-${idx}`}
+                        className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-[#090E1A] border border-slate-800/80"
+                      >
+                        <ProviderAvatar provider={pid} size="xs" />
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-slate-100 truncate">{label}</p>
+                          <p className="text-[10px] text-slate-500 tabular-nums">Seat {idx + 1}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </section>
+
+          {error && (
+            <div className="text-xs text-rose-200 bg-rose-950/40 border border-rose-800/60 rounded-xl px-4 py-3">
+              {error}
+            </div>
+          )}
+
+          <div className="flex items-center justify-between gap-3 pt-3 border-t border-slate-800/80">
+            <span className="text-xs text-slate-400 tabular-nums">
+              {seatCount} seats · {selectedProviders.length} provider{selectedProviders.length === 1 ? '' : 's'}
+            </span>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => onNavigate('dashboard')}
+                className="min-h-[44px] px-4 py-2 text-xs sm:text-sm font-medium text-slate-400 hover:text-slate-100 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={submitting || selectedProviders.length === 0}
+                className="inline-flex items-center gap-2 min-h-[44px] px-5 py-2.5 text-sm font-semibold bg-blue-600 hover:bg-blue-500 disabled:opacity-45 disabled:cursor-not-allowed text-white rounded-xl transition-colors whitespace-nowrap cursor-pointer"
+              >
+                {submitting
+                  ? 'Launching Council...'
+                  : mode === 'chat'
+                    ? 'Start Free Chat'
+                    : mode === 'debate'
+                      ? 'Start Debate'
+                      : 'Start Discussion'}
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </form>
       ) : (
+        /* Free BYOK & Admin Full Seat Customization Launcher */
         <form onSubmit={handleSubmit} className="max-w-3xl space-y-6">
           {/* 1. Council Name */}
           <section className="space-y-1.5">
@@ -704,7 +1070,6 @@ export function NewCouncilPage({
               </div>
             </div>
 
-            {/* Premium Automatic Priority Lineup Banner */}
             {isPremiumAutoMode && (
               <div className="bg-[#121A2F] border border-amber-500/35 rounded-xl px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
                 <div className="flex items-center gap-2 text-amber-200">
@@ -949,6 +1314,7 @@ export function NewCouncilPage({
         connections={connections}
         intelligenceLevel={intelligenceLevel}
         unavailableSet={unavailableSet}
+        hideModelDetails={isStreamlinedPremium}
         onSelectModel={(cid) => {
           if (activeSeatIndex !== null) {
             handleAssignSeat(activeSeatIndex, cid);

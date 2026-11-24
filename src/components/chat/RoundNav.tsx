@@ -16,6 +16,7 @@ export function RoundNav({
   activeRound,
   onSelectRound,
   isChatMode,
+  hideModelDetails = false,
 }: {
   filterModels: FilterModelChip[];
   selectedFilter: string;
@@ -24,6 +25,7 @@ export function RoundNav({
   activeRound: number | null;
   onSelectRound: (round: number) => void;
   isChatMode: boolean;
+  hideModelDetails?: boolean;
 }) {
   return (
     <div className="w-full shrink-0 border-b border-white/[0.06] bg-white/[0.02] px-3 sm:px-5 py-1.5 flex items-center justify-between gap-2 overflow-x-auto">
@@ -56,7 +58,7 @@ export function RoundNav({
                       ? 'bg-[rgba(124,77,232,0.25)] border-[rgba(167,139,250,0.6)] text-[#F4F7FD]'
                       : 'bg-white/[0.04] border-white/10 text-[#B4BFD4] hover:text-white hover:bg-white/[0.08]'
                   }`}
-                  title={m.compositeId}
+                  title={hideModelDetails ? m.label : m.compositeId}
                 >
                   <span
                     className="w-1.5 h-1.5 rounded-full shrink-0"

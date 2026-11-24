@@ -3,9 +3,11 @@ import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import {
   getProviderConfig,
+  isChatGptAliasModelId,
   isFreeRateLimitedProvider,
   isModelFreeTier,
   PROVIDER_IDS,
+  PROVIDER_REGISTRY,
 } from '../src/shared/providers.ts';
 import type {
   DiscussionMode,
@@ -14,6 +16,7 @@ import type {
   ProviderId,
   SmartSelectResult,
 } from '../src/shared/types.ts';
+import { buildChatGptAliasModelInfo } from './chatgptAlias.ts';
 import { inferModelTier, probeSingleModel } from './modelCatalogService.ts';
 import {
   classifyProviderError,
@@ -361,6 +364,7 @@ export async function smartSelectModels(params: {
   priorityOrder?: readonly ProviderId[];
   seatCount?: number;
   isPremium?: boolean;
+  maskAdminSharedModels?: boolean;
   runPreflightFn?: typeof runCouncilPreflight;
   probeModelFn?: typeof probeSingleModel;
   resolveKeyFn?: typeof resolveRuntimeApiKey;
@@ -575,35 +579,83 @@ export async function smartSelectModels(params: {
     };
   };
 
-  if (available.length === 1) {
+  const hasChatGptAliasInPool = available.some(
+    (m) => m.provider === 'openai' && isChatGptAliasModelId(m.modelId),
+  );
+  const canRepeatSeatsForCycle = Boolean(
+    params.isPremium && params.seatCount && (hasChatGptAliasInPool || params.maskAdminSharedModels),
+  );
+
+  if (available.length === 1 && !(canRepeatSeatsForCycle && (params.seatCount || 1) > 1)) {
     if (params.mode !== 'chat') {
       throw new Error(
-        `Multi-model ${params.mode === 'debate' ? 'Structured Debate' : 'Free Discussion'} requires at least 2 usable models, but only 1 (${available[0].compositeId}) is available. Switch to Single Model Chat or connect another model. Status: ${statusParts}.`,
+        `Multi-model ${params.mode === 'debate' ? 'Structured Debate' : 'Free Discussion'} requires at least 2 usable models, but only 1 (${params.maskAdminSharedModels ? PROVIDER_REGISTRY[available[0].provider].name : available[0].compositeId}) is available. Switch to Single Model Chat or connect another provider.`,
       );
     }
-    return verifyAndBuildResult(
+    const singleRes = await verifyAndBuildResult(
       [available[0].compositeId],
       'none',
       1,
       'capability_heuristic',
-      `Single Model Chat active: ${available[0].compositeId} selected.`,
+      `Single Model Chat active: ${
+        hasChatGptAliasInPool
+          ? 'ChatGPT'
+          : params.maskAdminSharedModels
+            ? PROVIDER_REGISTRY[available[0].provider].name
+            : available[0].compositeId
+      } selected.`,
     );
+    if (params.maskAdminSharedModels) {
+      const m0 = available[0];
+      const maskedId =
+        m0.provider === 'openai' && isChatGptAliasModelId(m0.modelId)
+          ? 'openai:chatgpt-1'
+          : `${m0.provider}:managed-1`;
+      return {
+        ...singleRes,
+        selectedModels: [maskedId],
+      };
+    }
+    return singleRes;
   }
 
-  // Deterministic cycling priority-order auto-selection (used by Premium managed seats: Gemini -> Groq -> OpenRouter -> Cohere)
-  if (params.priorityOrder && params.priorityOrder.length > 0) {
+  // Deterministic cycling priority-order auto-selection (used by Premium managed seats)
+  const effectiveCycleOrder: readonly ProviderId[] | undefined =
+    params.priorityOrder && params.priorityOrder.length > 0
+      ? params.priorityOrder
+      : params.isPremium && params.preferredProviders && params.preferredProviders.length > 0
+        ? params.preferredProviders
+        : undefined;
+
+  if (effectiveCycleOrder && effectiveCycleOrder.length > 0) {
     const requestedSeats = params.seatCount
-      ? Math.min(Math.max(Math.round(params.seatCount), 1), Math.min(6, available.length))
+      ? canRepeatSeatsForCycle
+        ? Math.min(Math.max(Math.round(params.seatCount), 1), 6)
+        : Math.min(Math.max(Math.round(params.seatCount), 1), Math.min(6, available.length))
       : Math.min(3, available.length);
     const seen = new Set<string>();
     const picked: ModelInfo[] = [];
 
-    const takeTopForProvider = async (pid: ProviderId): Promise<ModelInfo | null> => {
+    const takeTopForProvider = async (
+      pid: ProviderId,
+      slotIdx: number,
+    ): Promise<ModelInfo | null> => {
       for (const m of rankedPool) {
         if (m.provider !== pid || seen.has(m.compositeId)) continue;
         seen.add(m.compositeId);
         if (await isCandidateUsable(m)) {
           return m;
+        }
+      }
+      if (pid === 'openai' && hasChatGptAliasInPool) {
+        const aliasSlot = buildChatGptAliasModelInfo(slotIdx + 1);
+        seen.add(aliasSlot.compositeId);
+        return aliasSlot;
+      }
+      if (canRepeatSeatsForCycle) {
+        const usableSame = picked.find((m) => m.provider === pid) || rankedPool.find((m) => m.provider === pid);
+        if (usableSame && (await isCandidateUsable(usableSame))) {
+          return usableSame;
         }
       }
       return null;
@@ -621,12 +673,12 @@ export async function smartSelectModels(params: {
     };
 
     for (let slot = 0; slot < requestedSeats; slot++) {
-      const targetPid = params.priorityOrder[slot % params.priorityOrder.length];
-      let chosenModel = await takeTopForProvider(targetPid);
+      const targetPid = effectiveCycleOrder[slot % effectiveCycleOrder.length];
+      let chosenModel = await takeTopForProvider(targetPid, slot);
       if (!chosenModel) {
-        for (const fallbackPid of params.priorityOrder) {
+        for (const fallbackPid of effectiveCycleOrder) {
           if (fallbackPid === targetPid) continue;
-          chosenModel = await takeTopForProvider(fallbackPid);
+          chosenModel = await takeTopForProvider(fallbackPid, slot);
           if (chosenModel) break;
         }
       }
@@ -645,27 +697,50 @@ export async function smartSelectModels(params: {
     }
     if (picked.length === 1 && params.mode !== 'chat') {
       throw new Error(
-        `Multi-model ${params.mode === 'debate' ? 'Structured Debate' : 'Free Discussion'} requires at least 2 usable models, but only 1 (${picked[0].compositeId}) passed verification. Status: ${statusParts}.`,
+        `Multi-model ${params.mode === 'debate' ? 'Structured Debate' : 'Free Discussion'} requires at least 2 usable models, but only 1 passed verification.`,
       );
     }
 
-    const bestMod =
-      [...picked].sort(
-        (a, b) =>
-          TIER_RANK[b.tier || inferModelTier(b.modelId)] -
-          TIER_RANK[a.tier || inferModelTier(a.modelId)],
-      )[0]?.compositeId || picked[0].compositeId;
+    const bestModIndex = picked.reduce((bestIdx, item, idx, arr) => {
+      const bestTier = TIER_RANK[arr[bestIdx].tier || inferModelTier(arr[bestIdx].modelId)];
+      const curTier = TIER_RANK[item.tier || inferModelTier(item.modelId)];
+      return curTier > bestTier ? idx : bestIdx;
+    }, 0);
 
     const warnings = [...preflight.warnings];
-    if (failedProbes.length > 0) {
+    if (failedProbes.length > 0 && !params.maskAdminSharedModels) {
       warnings.push(`Skipped unresponsive models: ${failedProbes.slice(0, 3).join('; ')}`);
     }
 
+    const outputCompositeIds = picked.map((m, idx) => {
+      if (m.provider === 'openai' && isChatGptAliasModelId(m.modelId)) {
+        return params.maskAdminSharedModels || picked.filter((x, j) => j < idx && x.compositeId === m.compositeId).length > 0
+          ? `openai:chatgpt-${idx + 1}`
+          : m.compositeId;
+      }
+      if (params.maskAdminSharedModels) {
+        return `${m.provider}:managed-${idx + 1}`;
+      }
+      return m.compositeId;
+    });
+
+    const providerLabels = Array.from(
+      new Set(
+        picked.map((m) =>
+          m.provider === 'openai' && isChatGptAliasModelId(m.modelId)
+            ? 'ChatGPT'
+            : PROVIDER_REGISTRY[m.provider]?.name || m.provider,
+        ),
+      ),
+    ).join(', ');
+
     return {
-      selectedModels: picked.map((m) => m.compositeId),
-      moderatorModel: params.mode === 'chat' ? 'none' : bestMod,
+      selectedModels: outputCompositeIds,
+      moderatorModel: params.mode === 'chat' ? 'none' : outputCompositeIds[bestModIndex] || outputCompositeIds[0],
       intelligenceLevel,
-      rationale: `${INTELLIGENCE_LEVEL_META[intelligenceLevel].label} intelligence auto-filled ${picked.length} seats following priority order (${params.priorityOrder.join(' → ')}).`,
+      rationale: params.maskAdminSharedModels
+        ? `Auto-configured ${picked.length} council seats across ${providerLabels}.`
+        : `${INTELLIGENCE_LEVEL_META[intelligenceLevel].label} intelligence auto-filled ${picked.length} seats following priority order (${effectiveCycleOrder.join(' → ')}).`,
       warnings: Array.from(new Set(warnings)),
       method: 'capability_heuristic',
       singleModelMode: picked.length === 1,
