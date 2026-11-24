@@ -1,0 +1,458 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global safety net: default deny everything
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Global Hardened Primitives ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return isVerified() && request.auth.token.email == 'tahsinullahtusher999@gmail.com';
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Entity Validation Helpers ---
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll([
+          'uid', 'email', 'displayName', 'maxRoundsLimit',
+          'dailyRequestLimit', 'monthlySpendLimitUsd', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'uid', 'email', 'displayName', 'photoURL', 'preferredModeratorModel',
+          'subscriptionTier', 'subscriptionCycle', 'subscriptionExpiresAt',
+          'maxRoundsLimit', 'dailyRequestLimit', 'monthlySpendLimitUsd',
+          'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.uid)
+        && data.uid == userId
+        && data.uid == request.auth.uid
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 256
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
+        && (!data.keys().hasAny(['photoURL']) || (data.photoURL is string && data.photoURL.size() <= 512))
+        && (!data.keys().hasAny(['preferredModeratorModel']) || (data.preferredModeratorModel is string && data.preferredModeratorModel.size() <= 128))
+        && (!data.keys().hasAny(['subscriptionTier']) || data.subscriptionTier in ['free', 'premium'])
+        && (!data.keys().hasAny(['subscriptionCycle']) || data.subscriptionCycle in ['1m', '3m', '6m', '1y'])
+        && (!data.keys().hasAny(['subscriptionExpiresAt']) || (data.subscriptionExpiresAt is string && data.subscriptionExpiresAt.size() <= 64))
+        && data.maxRoundsLimit is int && data.maxRoundsLimit >= 1 && data.maxRoundsLimit <= 10
+        && data.dailyRequestLimit is int && data.dailyRequestLimit >= 1 && data.dailyRequestLimit <= 5000
+        && (data.monthlySpendLimitUsd is int || data.monthlySpendLimitUsd is float)
+        && data.monthlySpendLimitUsd >= 0 && data.monthlySpendLimitUsd <= 10000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidUserSubscription(data, userId) {
+      return data.keys().hasAll(['uid', 'email', 'tier', 'updatedAt'])
+        && data.keys().hasOnly([
+          'uid', 'email', 'tier', 'cycle', 'paymentMethod',
+          'paymentId', 'activatedAt', 'expiresAt', 'updatedAt', 'updatedBy'
+        ])
+        && isValidId(data.uid) && data.uid == userId
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 256
+        && data.tier in ['free', 'premium']
+        && (!data.keys().hasAny(['cycle']) || data.cycle in ['1m', '3m', '6m', '1y'])
+        && (!data.keys().hasAny(['paymentMethod']) || data.paymentMethod in ['mla', 'bkash', 'nagad'])
+        && (!data.keys().hasAny(['paymentId']) || (data.paymentId is string && data.paymentId.size() <= 128))
+        && (!data.keys().hasAny(['activatedAt']) || (data.activatedAt is string && data.activatedAt.size() <= 64))
+        && (!data.keys().hasAny(['expiresAt']) || (data.expiresAt is string && data.expiresAt.size() <= 64))
+        && data.updatedAt is string && data.updatedAt.size() <= 64
+        && (!data.keys().hasAny(['updatedBy']) || (data.updatedBy is string && data.updatedBy.size() <= 256));
+    }
+
+    function isValidPaymentSubmission(data, paymentId) {
+      return data.keys().hasAll([
+          'id', 'userId', 'userEmail', 'method', 'cycle',
+          'amountBdt', 'trxId', 'status', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'userId', 'userEmail', 'userName', 'method', 'cycle',
+          'amountBdt', 'trxId', 'senderNumber', 'status', 'reviewNote',
+          'createdAt', 'updatedAt', 'reviewedBy'
+        ])
+        && isValidId(data.id) && data.id == paymentId
+        && isValidId(data.userId)
+        && data.userEmail is string && data.userEmail.size() >= 3 && data.userEmail.size() <= 256
+        && (!data.keys().hasAny(['userName']) || (data.userName is string && data.userName.size() <= 120))
+        && data.method in ['mla', 'bkash', 'nagad']
+        && data.cycle in ['1m', '3m', '6m', '1y']
+        && data.amountBdt is int && data.amountBdt in [29, 49, 99, 149]
+        && data.trxId is string && data.trxId.size() >= 6 && data.trxId.size() <= 64
+        && (!data.keys().hasAny(['senderNumber']) || (data.senderNumber is string && data.senderNumber.size() <= 32))
+        && data.status in ['pending', 'approved', 'rejected']
+        && (!data.keys().hasAny(['reviewNote']) || (data.reviewNote is string && data.reviewNote.size() <= 256))
+        && data.createdAt is string && data.createdAt.size() <= 64
+        && data.updatedAt is string && data.updatedAt.size() <= 64
+        && (!data.keys().hasAny(['reviewedBy']) || (data.reviewedBy is string && data.reviewedBy.size() <= 256));
+    }
+
+    function isValidProviderCredential(data, userId, providerId) {
+      return providerId in ['google', 'openai', 'anthropic', 'groq', 'openrouter', 'cerebras', 'mistral', 'nvidia', 'sambanova', 'huggingface', 'together', 'cohere']
+        && data.keys().hasAll([
+          'providerId', 'userId', 'method', 'encryptedKey', 'iv', 'authTag',
+          'keyFingerprint', 'status', 'verifiedAt', 'availableModelsCount',
+          'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'providerId', 'userId', 'method', 'encryptedKey', 'iv', 'authTag',
+          'keyFingerprint', 'status', 'lastError', 'verifiedAt',
+          'availableModelsCount', 'createdAt', 'updatedAt'
+        ])
+        && data.providerId == providerId
+        && isValidId(data.userId)
+        && data.userId == userId
+        && data.userId == request.auth.uid
+        && data.method in ['byok', 'workspace_env']
+        && data.encryptedKey is string && data.encryptedKey.size() <= 4096
+        && data.iv is string && data.iv.size() <= 128
+        && data.authTag is string && data.authTag.size() <= 128
+        && data.keyFingerprint is string && data.keyFingerprint.size() >= 1 && data.keyFingerprint.size() <= 64
+        && data.status in ['connected', 'error', 'disconnected']
+        && (!data.keys().hasAny(['lastError']) || (data.lastError is string && data.lastError.size() <= 512))
+        && data.verifiedAt is string && data.verifiedAt.size() <= 64
+        && data.availableModelsCount is int && data.availableModelsCount >= 0 && data.availableModelsCount <= 500
+        && data.createdAt is string && data.createdAt.size() <= 64
+        && data.updatedAt is string && data.updatedAt.size() <= 64;
+    }
+
+    function isValidModelPreset(data, userId, presetId) {
+      return data.keys().hasAll([
+          'id', 'userId', 'name', 'models', 'moderatorModel', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'userId', 'name', 'description', 'models', 'moderatorModel', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.id) && data.id == presetId
+        && isValidId(data.userId) && data.userId == userId && data.userId == request.auth.uid
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 80
+        && (!data.keys().hasAny(['description']) || (data.description is string && data.description.size() <= 240))
+        && data.models is list && data.models.size() >= 2 && data.models.size() <= 8
+        && data.models[0] is string && data.models[1] is string
+        && data.moderatorModel is string && data.moderatorModel.size() >= 1 && data.moderatorModel.size() <= 128
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCouncilRoom(data, councilId) {
+      return data.keys().hasAll([
+          'id', 'userId', 'title', 'mode', 'status', 'selectedModels',
+          'moderatorModel', 'maxRounds', 'currentRound', 'archived',
+          'totalInputTokens', 'totalOutputTokens', 'estimatedCostUsd',
+          'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'userId', 'title', 'mode', 'intelligenceLevel', 'status', 'selectedModels',
+          'moderatorModel', 'maxRounds', 'currentRound', 'archived',
+          'totalInputTokens', 'totalOutputTokens', 'estimatedCostUsd',
+          'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.id) && data.id == councilId
+        && isValidId(data.userId) && data.userId == request.auth.uid
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 160
+        && data.mode in ['chat', 'free', 'debate']
+        && (!data.keys().hasAny(['intelligenceLevel']) || data.intelligenceLevel in ['low', 'medium', 'high', 'extreme'])
+        && data.status in ['idle', 'running', 'completed', 'stopped', 'error']
+        && data.selectedModels is list && data.selectedModels.size() >= 1 && data.selectedModels.size() <= 6
+        && data.selectedModels[0] is string
+        && (data.mode == 'chat' || (data.selectedModels.size() >= 2 && data.selectedModels[1] is string))
+        && data.moderatorModel is string && data.moderatorModel.size() >= 1 && data.moderatorModel.size() <= 128
+        && data.maxRounds is int && data.maxRounds >= 1 && data.maxRounds <= 6
+        && data.currentRound is int && data.currentRound >= 0 && data.currentRound <= 6
+        && data.archived is bool
+        && data.totalInputTokens is int && data.totalInputTokens >= 0 && data.totalInputTokens <= 100000000
+        && data.totalOutputTokens is int && data.totalOutputTokens >= 0 && data.totalOutputTokens <= 100000000
+        && (data.estimatedCostUsd is int || data.estimatedCostUsd is float)
+        && data.estimatedCostUsd >= 0 && data.estimatedCostUsd <= 10000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidReplyTo(ref) {
+      return ref is map
+        && ref.keys().hasAll(['messageId', 'role', 'provider', 'modelId', 'modelLabel', 'snippet'])
+        && ref.keys().hasOnly(['messageId', 'role', 'provider', 'modelId', 'modelLabel', 'snippet'])
+        && isValidId(ref.messageId)
+        && ref.role in ['user', 'model', 'moderator']
+        && ref.provider in ['user', 'google', 'openai', 'anthropic', 'groq', 'openrouter', 'cerebras', 'mistral', 'nvidia', 'sambanova', 'huggingface', 'together', 'cohere']
+        && ref.modelId is string && ref.modelId.size() >= 1 && ref.modelId.size() <= 128
+        && ref.modelLabel is string && ref.modelLabel.size() >= 1 && ref.modelLabel.size() <= 128
+        && ref.snippet is string && ref.snippet.size() <= 280;
+    }
+
+    function isValidCouncilMessage(data, councilId, messageId) {
+      return data.keys().hasAll([
+          'id', 'councilId', 'userId', 'role', 'provider', 'modelId',
+          'modelLabel', 'round', 'stageLabel', 'content', 'status',
+          'inputTokens', 'outputTokens', 'latencyMs', 'estimatedCostUsd',
+          'pricingKnown', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'councilId', 'userId', 'role', 'provider', 'modelId',
+          'modelLabel', 'round', 'stageLabel', 'content', 'status',
+          'errorMessage', 'inputTokens', 'outputTokens', 'latencyMs',
+          'estimatedCostUsd', 'pricingKnown', 'reactions', 'replyTo', 'createdAt'
+        ])
+        && isValidId(data.id) && data.id == messageId
+        && isValidId(data.councilId) && data.councilId == councilId
+        && isValidId(data.userId) && data.userId == request.auth.uid
+        && data.role in ['user', 'model', 'moderator']
+        && data.provider in ['user', 'google', 'openai', 'anthropic', 'groq', 'openrouter', 'cerebras', 'mistral', 'nvidia', 'sambanova', 'huggingface', 'together', 'cohere']
+        && data.modelId is string && data.modelId.size() >= 1 && data.modelId.size() <= 128
+        && data.modelLabel is string && data.modelLabel.size() >= 1 && data.modelLabel.size() <= 128
+        && data.round is int && data.round >= 0 && data.round <= 6
+        && data.stageLabel is string && data.stageLabel.size() >= 1 && data.stageLabel.size() <= 80
+        && data.content is string && data.content.size() <= 120000
+        && data.status in ['streaming', 'completed', 'stopped', 'error']
+        && (!data.keys().hasAny(['errorMessage']) || (data.errorMessage is string && data.errorMessage.size() <= 1000))
+        && data.inputTokens is int && data.inputTokens >= 0 && data.inputTokens <= 10000000
+        && data.outputTokens is int && data.outputTokens >= 0 && data.outputTokens <= 10000000
+        && data.latencyMs is int && data.latencyMs >= 0 && data.latencyMs <= 600000
+        && (data.estimatedCostUsd is int || data.estimatedCostUsd is float)
+        && data.estimatedCostUsd >= 0 && data.estimatedCostUsd <= 1000
+        && data.pricingKnown is bool
+        && (
+          !data.keys().hasAny(['reactions'])
+          || (
+            data.reactions is list
+            && data.reactions.size() <= 16
+            && (
+              data.reactions.size() == 0
+              || (
+                data.reactions[0] is map
+                && data.reactions[0].keys().hasAll(['emoji', 'reactorId', 'reactorLabel', 'reactorType'])
+                && data.reactions[0].keys().hasOnly(['emoji', 'reactorId', 'reactorLabel', 'reactorType'])
+                && data.reactions[0].emoji is string && data.reactions[0].emoji.size() >= 1 && data.reactions[0].emoji.size() <= 16
+                && data.reactions[0].reactorId is string && data.reactions[0].reactorId.size() >= 1 && data.reactions[0].reactorId.size() <= 128
+                && data.reactions[0].reactorLabel is string && data.reactions[0].reactorLabel.size() >= 1 && data.reactions[0].reactorLabel.size() <= 128
+                && data.reactions[0].reactorType in ['user', 'model', 'moderator']
+              )
+            )
+          )
+        )
+        && (!data.keys().hasAny(['replyTo']) || isValidReplyTo(data.replyTo))
+        && data.createdAt is timestamp;
+    }
+
+    function isValidUsageRecord(data, recordId) {
+      return data.keys().hasAll([
+          'id', 'userId', 'councilId', 'provider', 'modelId', 'round',
+          'status', 'inputTokens', 'outputTokens', 'estimatedCostUsd',
+          'pricingKnown', 'latencyMs', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'userId', 'councilId', 'provider', 'modelId', 'round',
+          'status', 'inputTokens', 'outputTokens', 'estimatedCostUsd',
+          'pricingKnown', 'latencyMs', 'createdAt'
+        ])
+        && isValidId(data.id) && data.id == recordId
+        && isValidId(data.userId) && data.userId == request.auth.uid
+        && isValidId(data.councilId) && data.councilId.size() <= 128
+        && data.provider in ['google', 'openai', 'anthropic', 'groq', 'openrouter', 'cerebras', 'mistral', 'nvidia', 'sambanova', 'huggingface', 'together', 'cohere']
+        && data.modelId is string && data.modelId.size() >= 1 && data.modelId.size() <= 128
+        && data.round is int && data.round >= 0 && data.round <= 6
+        && data.status in ['success', 'error', 'stopped']
+        && data.inputTokens is int && data.inputTokens >= 0 && data.inputTokens <= 10000000
+        && data.outputTokens is int && data.outputTokens >= 0 && data.outputTokens <= 10000000
+        && (data.estimatedCostUsd is int || data.estimatedCostUsd is float)
+        && data.estimatedCostUsd >= 0 && data.estimatedCostUsd <= 1000
+        && data.pricingKnown is bool
+        && data.latencyMs is int && data.latencyMs >= 0 && data.latencyMs <= 600000
+        && data.createdAt is timestamp;
+    }
+
+    // --- Collection Rules ---
+
+    // 1. User Profiles (Strict Owner-Only PII Isolation)
+    match /users/{userId} {
+      allow get: if isValidId(userId) && isOwner(userId);
+      allow list: if false;
+      allow create: if isValidId(userId) && isVerified() && isOwner(userId)
+        && isValidUserProfile(incoming(), userId)
+        && (!incoming().keys().hasAny(['subscriptionTier']) || incoming().subscriptionTier == 'free' || isAdmin())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(userId) && isVerified() && isOwner(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'displayName', 'photoURL', 'preferredModeratorModel',
+            'maxRoundsLimit', 'dailyRequestLimit', 'monthlySpendLimitUsd',
+            'email', 'updatedAt'
+          ])
+          || isAdmin()
+        );
+      allow delete: if isValidId(userId) && isVerified() && isOwner(userId);
+
+      // 2. Encrypted Provider Credentials
+      match /providerCredentials/{providerId} {
+        allow get: if isValidId(userId) && isValidId(providerId) && isOwner(userId);
+        allow list: if isValidId(userId) && isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow create: if isValidId(userId) && isValidId(providerId) && isVerified() && isOwner(userId)
+          && isValidProviderCredential(incoming(), userId, providerId);
+        allow update: if isValidId(userId) && isValidId(providerId) && isVerified() && isOwner(userId)
+          && isValidProviderCredential(incoming(), userId, providerId)
+          && incoming().userId == existing().userId
+          && incoming().providerId == existing().providerId
+          && incoming().createdAt == existing().createdAt
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'method', 'encryptedKey', 'iv', 'authTag', 'keyFingerprint',
+            'status', 'lastError', 'verifiedAt', 'availableModelsCount', 'updatedAt'
+          ]);
+        allow delete: if isValidId(userId) && isValidId(providerId) && isVerified() && isOwner(userId);
+      }
+
+      // 3. Model Presets
+      match /modelPresets/{presetId} {
+        allow get: if isValidId(userId) && isValidId(presetId) && isOwner(userId);
+        allow list: if isValidId(userId) && isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow create: if isValidId(userId) && isValidId(presetId) && isVerified() && isOwner(userId)
+          && isValidModelPreset(incoming(), userId, presetId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(userId) && isValidId(presetId) && isVerified() && isOwner(userId)
+          && isValidModelPreset(incoming(), userId, presetId)
+          && incoming().id == existing().id
+          && incoming().userId == existing().userId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'name', 'description', 'models', 'moderatorModel', 'updatedAt'
+          ]);
+        allow delete: if isValidId(userId) && isValidId(presetId) && isVerified() && isOwner(userId);
+      }
+    }
+
+    // 4. Council Rooms
+    match /councils/{councilId} {
+      allow get: if isValidId(councilId) && isSignedIn() && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isValidId(councilId) && isVerified()
+        && isValidCouncilRoom(incoming(), councilId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(councilId) && isVerified()
+        && isValidCouncilRoom(incoming(), councilId)
+        && existing().userId == request.auth.uid
+        && incoming().id == existing().id
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action: Rename or Archive
+          incoming().diff(existing()).affectedKeys().hasOnly(['title', 'archived', 'updatedAt'])
+          ||
+          // Action: Update configuration or run state
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'status', 'selectedModels', 'moderatorModel', 'maxRounds',
+            'currentRound', 'totalInputTokens', 'totalOutputTokens',
+            'estimatedCostUsd', 'updatedAt'
+          ])
+        );
+      allow delete: if isValidId(councilId) && isVerified() && existing().userId == request.auth.uid;
+
+      // 5. Council Messages (Master Gate checks parent council ownership)
+      match /messages/{messageId} {
+        allow get: if isValidId(councilId) && isValidId(messageId) && isSignedIn()
+          && existing().userId == request.auth.uid
+          && get(/databases/$(database)/documents/councils/$(councilId)).data.userId == request.auth.uid;
+        allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+        allow create: if isValidId(councilId) && isValidId(messageId) && isVerified()
+          && isValidCouncilMessage(incoming(), councilId, messageId)
+          && incoming().createdAt == request.time
+          && exists(/databases/$(database)/documents/councils/$(councilId))
+          && get(/databases/$(database)/documents/councils/$(councilId)).data.userId == request.auth.uid;
+        allow update: if isValidId(councilId) && isValidId(messageId) && isVerified()
+          && isValidCouncilMessage(incoming(), councilId, messageId)
+          && existing().userId == request.auth.uid
+          && incoming().id == existing().id
+          && incoming().councilId == existing().councilId
+          && incoming().userId == existing().userId
+          && incoming().createdAt == existing().createdAt
+          && (
+            // Action: Finalize streaming message
+            (
+              existing().status == 'streaming'
+              && incoming().diff(existing()).affectedKeys().hasOnly([
+                'content', 'status', 'errorMessage', 'inputTokens',
+                'outputTokens', 'latencyMs', 'estimatedCostUsd', 'pricingKnown'
+              ])
+            )
+            ||
+            // Action: Add or toggle message reactions
+            incoming().diff(existing()).affectedKeys().hasOnly(['reactions'])
+          )
+          && get(/databases/$(database)/documents/councils/$(councilId)).data.userId == request.auth.uid;
+        allow delete: if isValidId(councilId) && isValidId(messageId) && isVerified()
+          && existing().userId == request.auth.uid
+          && get(/databases/$(database)/documents/councils/$(councilId)).data.userId == request.auth.uid;
+      }
+    }
+
+    // 6. Usage Records (Immutable once created; deletable only by owner)
+    match /usageRecords/{recordId} {
+      allow get: if isValidId(recordId) && isSignedIn() && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isValidId(recordId) && isVerified()
+        && isValidUsageRecord(incoming(), recordId)
+        && incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isValidId(recordId) && isVerified() && existing().userId == request.auth.uid;
+    }
+
+    // 7. Authoritative User Subscriptions (Owner/Admin read; Admin-only write)
+    match /subscriptions/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow create, update: if isValidId(userId) && isAdmin() && isValidUserSubscription(incoming(), userId);
+      allow delete: if isValidId(userId) && isAdmin();
+    }
+
+    // 8. Payment Submissions (Owner creates pending bKash/Nagad; Admin reviews)
+    match /paymentSubmissions/{paymentId} {
+      allow get: if isValidId(paymentId) && isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isValidId(paymentId) && isVerified()
+        && isValidPaymentSubmission(incoming(), paymentId)
+        && incoming().userId == request.auth.uid
+        && incoming().status == 'pending'
+        && incoming().method in ['bkash', 'nagad'];
+      allow update: if isValidId(paymentId) && isAdmin()
+        && isValidPaymentSubmission(incoming(), paymentId)
+        && incoming().id == existing().id
+        && incoming().userId == existing().userId;
+      allow delete: if isAdmin();
+    }
+
+    // 9. Admin Shared Provider Pool Metadata
+    match /adminSharedProviders/{providerId} {
+      allow get, list: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+  }
+}

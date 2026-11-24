@@ -1,0 +1,6 @@
+{
+  "name": "T.U.T AI Council",
+  "description": "Multi-provider AI collaboration platform where connected AI models independently answer, critique, revise, and synthesize structured verdicts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

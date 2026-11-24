@@ -1,0 +1,579 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated user profile, preferences, and usage guardrails.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 3,
+          "maxLength": 256
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "photoURL": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "preferredModeratorModel": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "subscriptionTier": {
+          "type": "string",
+          "enum": ["free", "premium"],
+          "maxLength": 16
+        },
+        "subscriptionCycle": {
+          "type": "string",
+          "enum": ["1m", "3m", "6m", "1y"],
+          "maxLength": 16
+        },
+        "subscriptionExpiresAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "maxRoundsLimit": {
+          "type": "integer"
+        },
+        "dailyRequestLimit": {
+          "type": "integer"
+        },
+        "monthlySpendLimitUsd": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "uid",
+        "email",
+        "displayName",
+        "maxRoundsLimit",
+        "dailyRequestLimit",
+        "monthlySpendLimitUsd",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ProviderCredential": {
+      "title": "ProviderCredential",
+      "description": "Server-encrypted BYOK provider credential envelope and verification metadata.",
+      "type": "object",
+      "properties": {
+        "providerId": {
+          "type": "string",
+          "enum": ["google", "openai", "anthropic", "groq", "openrouter", "cerebras", "mistral", "nvidia", "sambanova", "huggingface", "together", "cohere"],
+          "maxLength": 32
+        },
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "method": {
+          "type": "string",
+          "enum": ["byok", "workspace_env"],
+          "maxLength": 32
+        },
+        "encryptedKey": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "iv": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "authTag": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "keyFingerprint": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "status": {
+          "type": "string",
+          "enum": ["connected", "error", "disconnected"],
+          "maxLength": 32
+        },
+        "lastError": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "verifiedAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "availableModelsCount": {
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "providerId",
+        "userId",
+        "method",
+        "encryptedKey",
+        "iv",
+        "authTag",
+        "keyFingerprint",
+        "status",
+        "verifiedAt",
+        "availableModelsCount",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ModelPreset": {
+      "title": "ModelPreset",
+      "description": "Saved multi-model selection preset for quickly launching council rooms.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "models": {
+          "type": "array"
+        },
+        "moderatorModel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "userId",
+        "name",
+        "models",
+        "moderatorModel",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CouncilRoom": {
+      "title": "CouncilRoom",
+      "description": "A multi-model AI collaboration session owned by a single user.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["chat", "free", "debate"],
+          "maxLength": 16
+        },
+        "intelligenceLevel": {
+          "type": "string",
+          "enum": ["low", "medium", "high", "extreme"],
+          "maxLength": 16
+        },
+        "status": {
+          "type": "string",
+          "enum": ["idle", "running", "completed", "stopped", "error"],
+          "maxLength": 16
+        },
+        "selectedModels": {
+          "type": "array"
+        },
+        "moderatorModel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "maxRounds": {
+          "type": "integer"
+        },
+        "currentRound": {
+          "type": "integer"
+        },
+        "archived": {
+          "type": "boolean"
+        },
+        "totalInputTokens": {
+          "type": "integer"
+        },
+        "totalOutputTokens": {
+          "type": "integer"
+        },
+        "estimatedCostUsd": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "userId",
+        "title",
+        "mode",
+        "status",
+        "selectedModels",
+        "moderatorModel",
+        "maxRounds",
+        "currentRound",
+        "archived",
+        "totalInputTokens",
+        "totalOutputTokens",
+        "estimatedCostUsd",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CouncilMessage": {
+      "title": "CouncilMessage",
+      "description": "Individual attributed message from user, model, or council moderator.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "councilId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["user", "model", "moderator"],
+          "maxLength": 16
+        },
+        "provider": {
+          "type": "string",
+          "enum": ["user", "google", "openai", "anthropic", "groq", "openrouter", "cerebras", "mistral", "nvidia", "sambanova", "huggingface", "together", "cohere"],
+          "maxLength": 16
+        },
+        "modelId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "modelLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "round": {
+          "type": "integer"
+        },
+        "stageLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "content": {
+          "type": "string",
+          "maxLength": 120000
+        },
+        "status": {
+          "type": "string",
+          "enum": ["streaming", "completed", "stopped", "error"],
+          "maxLength": 16
+        },
+        "errorMessage": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "inputTokens": {
+          "type": "integer"
+        },
+        "outputTokens": {
+          "type": "integer"
+        },
+        "latencyMs": {
+          "type": "integer"
+        },
+        "estimatedCostUsd": {
+          "type": "number"
+        },
+        "pricingKnown": {
+          "type": "boolean"
+        },
+        "reactions": {
+          "type": "array",
+          "description": "Bounded list (max 16) of user and AI emoji reactions attached to this message."
+        },
+        "replyTo": {
+          "type": "object",
+          "description": "Optional reference to a quoted message when the user replies directly to a participant."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "councilId",
+        "userId",
+        "role",
+        "provider",
+        "modelId",
+        "modelLabel",
+        "round",
+        "stageLabel",
+        "content",
+        "status",
+        "inputTokens",
+        "outputTokens",
+        "latencyMs",
+        "estimatedCostUsd",
+        "pricingKnown",
+        "createdAt"
+      ]
+    },
+    "UsageRecord": {
+      "title": "UsageRecord",
+      "description": "Immutable per-request usage and token metadata record.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "councilId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "provider": {
+          "type": "string",
+          "enum": ["google", "openai", "anthropic", "groq", "openrouter", "cerebras", "mistral", "nvidia", "sambanova", "huggingface", "together", "cohere"],
+          "maxLength": 16
+        },
+        "modelId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "round": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["success", "error", "stopped"],
+          "maxLength": 16
+        },
+        "inputTokens": {
+          "type": "integer"
+        },
+        "outputTokens": {
+          "type": "integer"
+        },
+        "estimatedCostUsd": {
+          "type": "number"
+        },
+        "pricingKnown": {
+          "type": "boolean"
+        },
+        "latencyMs": {
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "userId",
+        "councilId",
+        "provider",
+        "modelId",
+        "round",
+        "status",
+        "inputTokens",
+        "outputTokens",
+        "estimatedCostUsd",
+        "pricingKnown",
+        "latencyMs",
+        "createdAt"
+      ]
+    },
+    "UserSubscription": {
+      "title": "UserSubscription",
+      "description": "Authoritative two-tier subscription state managed by server/admin.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 256 },
+        "tier": { "type": "string", "enum": ["free", "premium"], "maxLength": 16 },
+        "cycle": { "type": "string", "enum": ["1m", "3m", "6m", "1y"], "maxLength": 16 },
+        "paymentMethod": { "type": "string", "enum": ["mla", "bkash", "nagad"], "maxLength": 16 },
+        "paymentId": { "type": "string", "maxLength": 128 },
+        "activatedAt": { "type": "string", "maxLength": 64 },
+        "expiresAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "updatedBy": { "type": "string", "maxLength": 256 }
+      },
+      "required": ["uid", "email", "tier", "updatedAt"]
+    },
+    "PaymentSubmission": {
+      "title": "PaymentSubmission",
+      "description": "User payment submission via T.U.T. MLA, bKash, or Nagad for Premium activation.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "userEmail": { "type": "string", "maxLength": 256 },
+        "userName": { "type": "string", "maxLength": 120 },
+        "method": { "type": "string", "enum": ["mla", "bkash", "nagad"], "maxLength": 16 },
+        "cycle": { "type": "string", "enum": ["1m", "3m", "6m", "1y"], "maxLength": 16 },
+        "amountBdt": { "type": "integer" },
+        "trxId": { "type": "string", "minLength": 4, "maxLength": 64 },
+        "senderNumber": { "type": "string", "maxLength": 32 },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"], "maxLength": 16 },
+        "reviewNote": { "type": "string", "maxLength": 256 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "reviewedBy": { "type": "string", "maxLength": 256 }
+      },
+      "required": ["id", "userId", "userEmail", "method", "cycle", "amountBdt", "trxId", "status", "createdAt", "updatedAt"]
+    },
+    "AdminSharedProvider": {
+      "title": "AdminSharedProvider",
+      "description": "Admin-managed provider pool metadata for Premium subscribers.",
+      "type": "object",
+      "properties": {
+        "providerId": { "type": "string", "maxLength": 32 },
+        "status": { "type": "string", "enum": ["connected", "error", "disconnected"], "maxLength": 32 },
+        "keyFingerprint": { "type": "string", "maxLength": 64 },
+        "verifiedAt": { "type": "string", "maxLength": 64 },
+        "availableModelsCount": { "type": "integer" },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "updatedBy": { "type": "string", "maxLength": 256 }
+      },
+      "required": ["providerId", "status", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private user profile, settings, and limits."
+    },
+    "/users/{userId}/providerCredentials/{providerId}": {
+      "schema": { "$ref": "#/entities/ProviderCredential" },
+      "description": "AES-256-GCM encrypted BYOK credentials per provider."
+    },
+    "/users/{userId}/modelPresets/{presetId}": {
+      "schema": { "$ref": "#/entities/ModelPreset" },
+      "description": "Saved multi-model selection presets."
+    },
+    "/councils/{councilId}": {
+      "schema": { "$ref": "#/entities/CouncilRoom" },
+      "description": "User-owned Council Room metadata and aggregates."
+    },
+    "/councils/{councilId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/CouncilMessage" },
+      "description": "Attributed messages and moderator verdicts inside a Council Room."
+    },
+    "/usageRecords/{recordId}": {
+      "schema": { "$ref": "#/entities/UsageRecord" },
+      "description": "Per-request token usage and cost records."
+    },
+    "/subscriptions/{userId}": {
+      "schema": { "$ref": "#/entities/UserSubscription" },
+      "description": "Authoritative two-tier subscription state (owner read, admin write)."
+    },
+    "/paymentSubmissions/{paymentId}": {
+      "schema": { "$ref": "#/entities/PaymentSubmission" },
+      "description": "Manual bKash/Nagad and MLA payment submissions for Premium."
+    },
+    "/adminSharedProviders/{providerId}": {
+      "schema": { "$ref": "#/entities/AdminSharedProvider" },
+      "description": "Admin-only shared provider pool metadata."
+    }
+  }
+}
