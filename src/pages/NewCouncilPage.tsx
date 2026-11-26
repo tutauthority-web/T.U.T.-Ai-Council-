@@ -62,12 +62,14 @@ export function NewCouncilPage({
   initialModeratorModel,
   initialMode = 'chat',
   onNavigate,
+  onBack,
   onCreatedAndStart,
 }: {
   initialSelectedModels: string[];
   initialModeratorModel?: string;
   initialMode?: DiscussionMode;
   onNavigate: (route: AppRoute) => void;
+  onBack?: () => void;
   onCreatedAndStart: (councilId: string, initialPrompt: string) => void;
 }) {
   const prefersReduced = Boolean(useReducedMotion());
@@ -581,8 +583,9 @@ export function NewCouncilPage({
     <AppShell
       currentRoute="new-council"
       pageTitle="New Council"
-      breadcrumb="Workspace"
       onNavigate={onNavigate}
+      showBackButton
+      onBack={onBack || (() => onNavigate('dashboard'))}
     >
       {availableModels.length === 0 ? (
         <div className="bg-[#111827] border border-slate-800 rounded-xl p-6 max-w-xl space-y-4">
@@ -843,7 +846,7 @@ export function NewCouncilPage({
             <div className="flex items-center gap-3">
               <button
                 type="button"
-                onClick={() => onNavigate('dashboard')}
+                onClick={() => (onBack ? onBack() : onNavigate('dashboard'))}
                 className="min-h-[44px] px-4 py-2 text-xs sm:text-sm font-medium text-slate-400 hover:text-slate-100 transition-colors cursor-pointer"
               >
                 Cancel
@@ -1275,7 +1278,7 @@ export function NewCouncilPage({
             <div className="flex items-center gap-3">
               <button
                 type="button"
-                onClick={() => onNavigate('dashboard')}
+                onClick={() => (onBack ? onBack() : onNavigate('dashboard'))}
                 className="min-h-[44px] px-4 py-2 text-xs sm:text-sm font-medium text-slate-400 hover:text-slate-100 transition-colors cursor-pointer"
               >
                 Cancel

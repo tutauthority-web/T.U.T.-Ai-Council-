@@ -204,7 +204,6 @@ export function HistoryPage({
     <AppShell
       currentRoute="history"
       pageTitle="Chat History"
-      breadcrumb="Workspace"
       onNavigate={onNavigate}
       fullBleed
       primaryAction={

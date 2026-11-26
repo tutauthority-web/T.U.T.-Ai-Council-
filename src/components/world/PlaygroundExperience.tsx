@@ -17,7 +17,7 @@ import {
   UserRound,
   X,
 } from 'lucide-react';
-import { AppShellMobileMenuButton, type AppRoute } from '../AppShell';
+import { type AppRoute } from '../AppShell';
 import { useAuth } from '../../contexts/AuthContext';
 import { useWorldTheme } from '../../contexts/WorldThemeContext';
 import { timestampToMillis } from '../../lib/firestoreService';
@@ -171,6 +171,18 @@ export function PlaygroundExperience({
     holdRafRef.current = requestAnimationFrame(step);
   }, [gatheringPhase, stopHoldLoop, reducedMotion, triggerGatheringSequence]);
 
+  const handlePointerUpPortal = useCallback(() => {
+    if (gatheringPhase === 'gathering' || gatheringPhase === 'entered') return;
+    const elapsed = performance.now() - holdStartRef.current;
+    if (gatheringPhase === 'charging' && elapsed < 260) {
+      triggerGatheringSequence();
+      return;
+    }
+    stopHoldLoop();
+    setHoldProgress(0);
+    setGatheringPhase('idle');
+  }, [gatheringPhase, stopHoldLoop, triggerGatheringSequence]);
+
   const cancelHold = useCallback(() => {
     if (gatheringPhase === 'gathering' || gatheringPhase === 'entered') return;
     stopHoldLoop();
@@ -223,26 +235,26 @@ export function PlaygroundExperience({
 
   const novaSubtitle = useMemo(() => {
     if (gatheringPhase === 'gathering' || gatheringPhase === 'entered') {
-      return 'Portal open · Gathering your AI Council...';
+      return 'Portal open · Gathering Council...';
     }
     if (gatheringPhase === 'charging') {
-      return 'Keep holding to awaken the Council Portal...';
+      return 'Hold to awaken Council Portal...';
     }
     if (!isAuthenticated) {
-      return 'Nova awaits · Sign in & connect an AI key to start a Council';
+      return 'Sign in & connect a key to start';
     }
     if (connectionsLoading) {
-      return 'Nova is syncing live provider connections...';
+      return 'Syncing live providers...';
     }
     if (hideModelDetails) {
-      return `Nova says Premium Cloud is active · ${operationalProviders.length} providers ready`;
+      return `Premium Cloud · ${operationalProviders.length} providers ready`;
     }
     if (operationalProviders.length > 0) {
-      return `Nova says ${operationalProviders.length} AI ${
-        operationalProviders.length === 1 ? 'provider is' : 'providers are'
-      } ready (${usableModelsCount} models)`;
+      return `${operationalProviders.length} AI ${
+        operationalProviders.length === 1 ? 'provider' : 'providers'
+      } ready · ${usableModelsCount} models`;
     }
-    return 'Nova awaits · Connect a provider key to awaken your AI team';
+    return 'Connect a key to awaken your AI team';
   }, [
     gatheringPhase,
     isAuthenticated,
@@ -336,18 +348,17 @@ export function PlaygroundExperience({
       </WorldCanvas>
 
       {/* Top HUD Bar */}
-      <div className="pointer-events-none absolute top-0 inset-x-0 z-20 p-2.5 sm:p-4 flex items-center justify-between gap-2.5">
+      <div className="pointer-events-none absolute top-0 inset-x-0 z-20 p-2.5 sm:p-4 flex items-center justify-between gap-2">
         {/* Left Greeting + Nova Status */}
         {!hudHidden ? (
           <div
             className={`pointer-events-auto flex items-center gap-2.5 px-3 py-2 rounded-2xl border ${hudSurfaceClass} min-w-0 max-w-[calc(100vw-9.5rem)] sm:max-w-md`}
           >
-            <AppShellMobileMenuButton />
             <div className="w-9 h-9 rounded-full bg-gradient-to-br from-sky-400/25 via-indigo-500/25 to-violet-500/35 border border-sky-400/45 flex items-center justify-center shrink-0">
               <Bot className="w-4 h-4 text-sky-400" />
             </div>
             <div className="min-w-0">
-              <h1 className="font-display text-sm sm:text-base font-bold truncate leading-tight">
+              <h1 className="font-display text-[13px] sm:text-base font-bold truncate leading-tight">
                 {getGreetingPrefix()}, {firstName}
               </h1>
               <p
@@ -360,12 +371,10 @@ export function PlaygroundExperience({
             </div>
           </div>
         ) : (
-          <div className="pointer-events-auto">
-            <AppShellMobileMenuButton className={hudSurfaceClass} />
-          </div>
+          <div />
         )}
 
-        {/* Right Controls: Day/Night, Quality, Alerts/Workspace, Zen Toggle */}
+        {/* Right Controls: Day/Night, Quality, Workspace, Zen Toggle */}
         <div className="pointer-events-auto flex items-center gap-1.5 shrink-0">
           {!hudHidden && (
             <>
@@ -373,7 +382,7 @@ export function PlaygroundExperience({
                 type="button"
                 onClick={toggleTimeOfDay}
                 aria-label={isDay ? 'Switch to Night atmosphere' : 'Switch to Day atmosphere'}
-                className={`inline-flex items-center justify-center sm:w-auto sm:px-3 gap-1.5 w-9 h-9 rounded-xl border text-xs font-medium transition-colors whitespace-nowrap cursor-pointer ${hudSurfaceClass}`}
+                className={`inline-flex items-center justify-center sm:w-auto sm:px-3 gap-1.5 w-10 h-10 rounded-xl border text-xs font-medium transition-colors whitespace-nowrap cursor-pointer ${hudSurfaceClass}`}
               >
                 {isDay ? (
                   <>
@@ -400,7 +409,7 @@ export function PlaygroundExperience({
                   )
                 }
                 title="Cycle 3D rendering quality (High / Balanced / Lite)"
-                className={`hidden md:inline-flex items-center gap-1.5 h-9 px-3 rounded-xl border text-xs font-medium transition-colors whitespace-nowrap cursor-pointer ${hudSurfaceClass}`}
+                className={`hidden md:inline-flex items-center gap-1.5 h-10 px-3 rounded-xl border text-xs font-medium transition-colors whitespace-nowrap cursor-pointer ${hudSurfaceClass}`}
               >
                 <span className="capitalize">{qualityTier} 3D</span>
               </button>
@@ -409,7 +418,7 @@ export function PlaygroundExperience({
                 type="button"
                 onClick={() => setDrawerOpen((v) => !v)}
                 aria-label="Open workspace overview and notifications"
-                className={`relative inline-flex items-center justify-center gap-1.5 w-9 h-9 sm:w-auto sm:px-3 rounded-xl border text-xs font-medium transition-colors whitespace-nowrap cursor-pointer ${hudSurfaceClass}`}
+                className={`relative inline-flex items-center justify-center gap-1.5 w-10 h-10 sm:w-auto sm:px-3 rounded-xl border text-xs font-medium transition-colors whitespace-nowrap cursor-pointer ${hudSurfaceClass}`}
               >
                 <Bell className="w-4 h-4 text-blue-400" />
                 <span className="hidden sm:inline">Workspace</span>
@@ -424,7 +433,7 @@ export function PlaygroundExperience({
             type="button"
             onClick={() => setHudHidden((v) => !v)}
             aria-label={hudHidden ? 'Show world controls' : 'Hide HUD for scenic view'}
-            className={`inline-flex items-center justify-center w-9 h-9 rounded-xl border transition-colors cursor-pointer ${hudSurfaceClass}`}
+            className={`inline-flex items-center justify-center w-10 h-10 rounded-xl border transition-colors cursor-pointer ${hudSurfaceClass}`}
           >
             {hudHidden ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
           </button>
@@ -696,11 +705,10 @@ export function PlaygroundExperience({
         </div>
       )}
 
-      {/* Bottom Interactive Dock: Portal Press-and-Hold + Council Modes */}
+      {/* Bottom Interactive Dock: Unified Portal CTA + Council Modes */}
       {!hudHidden && (
-        <div className="pointer-events-none absolute bottom-0 inset-x-0 z-20 p-2.5 sm:p-4 flex flex-col items-center gap-2">
-          {/* Status chip + Portal Hold Trigger */}
-          <div className="pointer-events-auto flex flex-col items-center gap-2 w-full max-w-md">
+        <div className="pointer-events-none absolute bottom-0 inset-x-0 z-20 px-2.5 pb-2.5 pt-2 sm:p-4 flex flex-col items-center gap-2">
+          <div className="pointer-events-auto flex flex-col items-center gap-1.5 w-full max-w-md">
             <div
               className={`inline-flex items-center gap-2 px-3 py-1 rounded-xl border text-[11px] font-medium ${hudSurfaceClass}`}
             >
@@ -714,93 +722,82 @@ export function PlaygroundExperience({
                 {operationalProviders.length} online
               </span>
               <span className={isDay ? 'text-slate-600' : 'text-slate-300'}>
-                Hold the portal to gather your council
+                Tap or hold the portal to gather your council
               </span>
             </div>
 
-            <div className="flex items-center justify-center gap-2.5 w-full">
-              <button
-                type="button"
-                onPointerDown={startHold}
-                onPointerUp={cancelHold}
-                onPointerLeave={cancelHold}
-                onPointerCancel={cancelHold}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    triggerGatheringSequence();
-                  }
-                }}
-                disabled={gatheringPhase === 'gathering' || gatheringPhase === 'entered'}
-                aria-label="Press and hold to gather your AI Council and open New Council"
-                className={`relative inline-flex items-center gap-2.5 pl-2 pr-4 py-1.5 rounded-2xl border font-display font-semibold text-sm transition-transform active:scale-[0.98] cursor-pointer whitespace-nowrap shadow-lg ${
-                  gatheringPhase === 'gathering' || gatheringPhase === 'entered'
-                    ? 'bg-violet-600 border-violet-400 text-white'
+            <button
+              type="button"
+              onPointerDown={startHold}
+              onPointerUp={handlePointerUpPortal}
+              onPointerLeave={cancelHold}
+              onPointerCancel={cancelHold}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  triggerGatheringSequence();
+                }
+              }}
+              disabled={gatheringPhase === 'gathering' || gatheringPhase === 'entered'}
+              aria-label="Tap or press and hold to gather your AI Council and open New Council"
+              className={`relative inline-flex items-center gap-2.5 min-h-[52px] pl-2 pr-5 py-1.5 rounded-2xl border font-display font-semibold text-sm transition-transform active:scale-[0.98] cursor-pointer whitespace-nowrap shadow-lg ${
+                gatheringPhase === 'gathering' || gatheringPhase === 'entered'
+                  ? 'bg-violet-600 border-violet-400 text-white'
+                  : gatheringPhase === 'charging'
+                    ? 'bg-blue-600 border-sky-300 text-white'
+                    : 'bg-gradient-to-r from-blue-600 to-violet-600 hover:from-blue-500 hover:to-violet-500 border-blue-400/50 text-white'
+              }`}
+            >
+              <span className="relative w-10 h-10 flex items-center justify-center shrink-0">
+                <svg className="w-10 h-10 -rotate-90" viewBox="0 0 56 56" aria-hidden="true">
+                  <circle
+                    cx="28"
+                    cy="28"
+                    r="24"
+                    fill="none"
+                    stroke="rgba(255,255,255,0.22)"
+                    strokeWidth="3.5"
+                  />
+                  <circle
+                    cx="28"
+                    cy="28"
+                    r="24"
+                    fill="none"
+                    stroke="#67e8f9"
+                    strokeWidth="3.5"
+                    strokeLinecap="round"
+                    strokeDasharray={holdCircumference}
+                    strokeDashoffset={
+                      gatheringPhase === 'gathering' || gatheringPhase === 'entered'
+                        ? 0
+                        : holdDashOffset
+                    }
+                  />
+                </svg>
+                <MessageSquarePlus className="w-4 h-4 absolute text-white" />
+              </span>
+
+              <span className="text-left">
+                <span className="block leading-tight text-sm">
+                  {gatheringPhase === 'gathering' || gatheringPhase === 'entered'
+                    ? 'Gathering Council...'
                     : gatheringPhase === 'charging'
-                      ? 'bg-blue-600 border-sky-300 text-white'
-                      : 'bg-gradient-to-r from-blue-600 to-violet-600 hover:from-blue-500 hover:to-violet-500 border-blue-400/50 text-white'
-                }`}
-              >
-                <span className="relative w-10 h-10 flex items-center justify-center shrink-0">
-                  <svg className="w-10 h-10 -rotate-90" viewBox="0 0 56 56" aria-hidden="true">
-                    <circle
-                      cx="28"
-                      cy="28"
-                      r="24"
-                      fill="none"
-                      stroke="rgba(255,255,255,0.22)"
-                      strokeWidth="3.5"
-                    />
-                    <circle
-                      cx="28"
-                      cy="28"
-                      r="24"
-                      fill="none"
-                      stroke="#67e8f9"
-                      strokeWidth="3.5"
-                      strokeLinecap="round"
-                      strokeDasharray={holdCircumference}
-                      strokeDashoffset={
-                        gatheringPhase === 'gathering' || gatheringPhase === 'entered'
-                          ? 0
-                          : holdDashOffset
-                      }
-                    />
-                  </svg>
-                  <MessageSquarePlus className="w-4 h-4 absolute text-white" />
+                      ? `Awakening Portal ${Math.round(holdProgress * 100)}%`
+                      : '+ New Council'}
                 </span>
-
-                <span className="text-left">
-                  <span className="block leading-tight text-sm">
-                    {gatheringPhase === 'gathering' || gatheringPhase === 'entered'
-                      ? 'Gathering Council...'
-                      : gatheringPhase === 'charging'
-                        ? `Awakening Portal ${Math.round(holdProgress * 100)}%`
-                        : '+ New Council'}
-                  </span>
-                  <span className="block text-[10px] font-normal text-blue-100/90">
-                    {gatheringPhase === 'charging' ? 'Release to cancel' : 'Press and hold'}
-                  </span>
+                <span className="block text-[10px] font-normal text-blue-100/90">
+                  {gatheringPhase === 'charging' ? 'Release now to launch' : 'Tap or press & hold'}
                 </span>
-              </button>
-
-              <button
-                type="button"
-                disabled={gatheringPhase === 'gathering' || gatheringPhase === 'entered'}
-                onClick={triggerGatheringSequence}
-                className={`min-h-[44px] px-3.5 py-2 rounded-2xl border text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer disabled:opacity-50 ${hudSurfaceClass}`}
-              >
-                Tap
-              </button>
-            </div>
+              </span>
+            </button>
           </div>
 
-          {/* Council Modes Strip (matching app screenshot structure) */}
+          {/* Council Modes Strip */}
           <div
-            className={`pointer-events-auto rounded-2xl border px-3 py-2 flex items-center justify-between gap-2 max-w-md w-full ${hudSurfaceClass}`}
+            className={`pointer-events-auto rounded-2xl border px-3 py-1.5 flex items-center justify-between gap-2 max-w-md w-full ${hudSurfaceClass}`}
           >
             <span className="text-[11px] font-semibold opacity-75 whitespace-nowrap">
-              Council modes
+              Modes
             </span>
             <div className="flex items-center gap-1 overflow-x-auto">
               {(
@@ -817,7 +814,7 @@ export function PlaygroundExperience({
                     type="button"
                     disabled={gatheringPhase === 'gathering' || gatheringPhase === 'entered'}
                     onClick={() => setSelectedMode(m.id)}
-                    className={`px-2.5 py-1 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer ${
+                    className={`min-h-[36px] px-2.5 py-1 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer ${
                       active
                         ? 'bg-blue-600 text-white'
                         : isDay

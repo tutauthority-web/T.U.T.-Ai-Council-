@@ -31,6 +31,7 @@ export interface CharacterActorProps {
   holdProgress?: number;
   reducedMotion?: boolean;
   showLabels?: boolean;
+  selected?: boolean;
   onSelect?: (id: string) => void;
   onEnteredPortal?: (id: string) => void;
 }
@@ -102,6 +103,7 @@ export function CharacterActor({
   holdProgress = 0,
   reducedMotion = false,
   showLabels = true,
+  selected = false,
   onSelect,
   onEnteredPortal,
 }: CharacterActorProps) {
@@ -112,6 +114,8 @@ export function CharacterActor({
   const rigRef = useRef<ArticulatedCharacterRig | null>(null);
   const mixerRef = useRef<THREE.AnimationMixer | null>(null);
   const actionsRef = useRef<Record<CharacterAnimState, THREE.AnimationAction> | null>(null);
+  const selectRingRef = useRef<THREE.Mesh | null>(null);
+  const novaSatellitesRef = useRef<THREE.Group | null>(null);
 
   const activeStateRef = useRef<CharacterAnimState>('idle');
   const labelGroupRef = useRef<THREE.Group | null>(null);
@@ -173,14 +177,20 @@ export function CharacterActor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, clips]);
 
-  // Reset gathering flags when returning to idle
+  // Reset gathering flags and restore idle action cleanly when returning to idle
   useEffect(() => {
     const rig = rigRef.current;
+    const actions = actionsRef.current;
     if (gatheringPhase === 'idle' && rig) {
       gatherElapsedRef.current = 0;
       enteredNotifiedRef.current = false;
       rig.root.scale.setScalar(1);
       rig.root.visible = true;
+      if (actions) {
+        actions.enterPortal.stop();
+        actions.idle.reset().setEffectiveWeight(1).play();
+        activeStateRef.current = 'idle';
+      }
     }
   }, [gatheringPhase]);
 
@@ -210,12 +220,38 @@ export function CharacterActor({
     if (!rig || !mixer) return;
 
     const dt = Math.min(delta, 0.05);
+    const t = state.clock.elapsedTime;
     mixer.update(reducedMotion ? dt * 0.25 : dt);
     if (labelGroupRef.current) {
       labelGroupRef.current.position.copy(rig.root.position);
     }
 
+    if (selectRingRef.current) {
+      selectRingRef.current.position.set(rig.root.position.x, rig.root.position.y + 0.025, rig.root.position.z);
+      if (!reducedMotion) {
+        const pulse = selected ? 1.06 + Math.sin(t * 4.2) * 0.08 : 1.02 + Math.sin(t * 3.0) * 0.04;
+        selectRingRef.current.scale.setScalar(pulse);
+        selectRingRef.current.rotation.z += dt * (selected ? 1.6 : 0.8);
+      }
+    }
+
+    if (novaSatellitesRef.current) {
+      novaSatellitesRef.current.position.copy(rig.root.position);
+      if (!reducedMotion) {
+        novaSatellitesRef.current.rotation.y += dt * (1.2 + holdProgress * 3.2);
+        novaSatellitesRef.current.position.y += 1.08 + Math.sin(t * 2.4) * 0.08;
+      } else {
+        novaSatellitesRef.current.position.y += 1.08;
+      }
+    }
+
     const isOperational = status === 'operational' || status === 'connecting';
+
+    if (isOperational && !reducedMotion) {
+      const breathe = Math.sin(t * 2.5 + gatherDelaySec * 2.1);
+      rig.materials.eyeGlow.emissiveIntensity = 1.9 + breathe * 0.35 + holdProgress * 0.9;
+      rig.materials.accentGlow.emissiveIntensity = 1.35 + breathe * 0.25 + holdProgress * 0.85;
+    }
 
     // 1. Disconnected characters stay calmly dormant at perimeter
     if (status === 'disconnected' && kind !== 'nova') {
@@ -381,6 +417,38 @@ export function CharacterActor({
       }}
     >
       <group ref={rigContainerRef} />
+
+      {/* Ground Selection / Hover Halo */}
+      {(selected || hovered) && gatheringPhase !== 'entered' && (
+        <mesh ref={selectRingRef} rotation={[-Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[0.62, 0.76, 24]} />
+          <meshBasicMaterial
+            color={selected ? '#38bdf8' : '#93c5fd'}
+            transparent
+            opacity={selected ? 0.85 : 0.55}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+      )}
+
+      {/* Nova Twin Orbital Data Satellites */}
+      {kind === 'nova' && gatheringPhase !== 'entered' && (
+        <group ref={novaSatellitesRef}>
+          {[0, Math.PI].map((ang, i) => (
+            <mesh
+              key={i}
+              position={[Math.cos(ang) * 0.72, i === 0 ? 0.08 : -0.06, Math.sin(ang) * 0.72]}
+            >
+              <octahedronGeometry args={[0.065, 0]} />
+              <meshStandardMaterial
+                color={i === 0 ? '#67e8f9' : '#c4b5fd'}
+                emissive={i === 0 ? '#38bdf8' : '#8b5cf6'}
+                emissiveIntensity={1.85}
+              />
+            </mesh>
+          ))}
+        </group>
+      )}
 
       <group ref={labelGroupRef}>
         {showLabels && gatheringPhase !== 'entered' && (

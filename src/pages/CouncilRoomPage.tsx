@@ -108,11 +108,13 @@ export function CouncilRoomPage({
   initialAutoPrompt,
   onClearInitialPrompt,
   onNavigate,
+  onBack,
 }: {
   councilId: string;
   initialAutoPrompt: string | null;
   onClearInitialPrompt: () => void;
   onNavigate: (route: AppRoute) => void;
+  onBack?: () => void;
 }) {
   const { user, councils, isPremium, isAdmin, addSessionUsage, refreshProviderState } =
     useAuth();
@@ -1314,8 +1316,9 @@ export function CouncilRoomPage({
       <AppShell
         currentRoute="council-room"
         pageTitle="Council Room"
-        breadcrumb="Chat History"
         onNavigate={onNavigate}
+        showBackButton
+        onBack={onBack || (() => onNavigate('history'))}
         fullBleed
       >
         <div className="council-chat-mesh w-full h-full flex items-center justify-center px-4">
@@ -1475,8 +1478,8 @@ export function CouncilRoomPage({
     <AppShell
       currentRoute="council-room"
       pageTitle={council.title}
-      breadcrumb={modeLabel}
       onNavigate={onNavigate}
+      onBack={onBack}
       fullBleed
       hideTopBar
     >
@@ -1497,6 +1500,7 @@ export function CouncilRoomPage({
             onStop={() => void handleStop()}
             onExportMarkdown={handleExportMarkdown}
             onExportJSON={handleExportJSON}
+            onBack={onBack || (() => onNavigate('history'))}
             hideModelDetails={hideModelDetails}
           />
 

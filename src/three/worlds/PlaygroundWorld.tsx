@@ -353,26 +353,31 @@ function AtmosphericMotes({
 }
 
 /**
- * Monumental New Council Entrance Portal with progressive activation rings,
- * levitating crystal keystone, and swirling vortex shader.
+ * Monumental New Council Entrance Portal with multi-ring gyroscope, orbital keystone satellites,
+ * swirling vortex particles, pulsing dais shockwave, and progressive activation shader.
  */
 function CouncilEntrancePortal({
   isDay,
   holdProgress,
   gatheringPhase,
+  reducedMotion,
   onPointerDown,
   onPointerUpOrLeave,
 }: {
   isDay: boolean;
   holdProgress: number;
   gatheringPhase: 'idle' | 'charging' | 'gathering' | 'entered';
+  reducedMotion: boolean;
   onPointerDown: () => void;
   onPointerUpOrLeave: () => void;
 }) {
   const outerRingRef = useRef<THREE.Mesh | null>(null);
+  const midRingRef = useRef<THREE.Mesh | null>(null);
   const innerRingRef = useRef<THREE.Mesh | null>(null);
-  const crownHaloRef = useRef<THREE.Mesh | null>(null);
+  const crownHaloRef = useRef<THREE.Group | null>(null);
   const keystoneRef = useRef<THREE.Mesh | null>(null);
+  const shockwaveRef = useRef<THREE.Mesh | null>(null);
+  const vortexParticlesRef = useRef<THREE.Group | null>(null);
   const portalLightRef = useRef<THREE.PointLight | null>(null);
 
   const portalUniforms = useMemo(
@@ -385,6 +390,17 @@ function CouncilEntrancePortal({
     [],
   );
 
+  const vortexSeeds = useMemo(
+    () =>
+      Array.from({ length: 10 }, (_, i) => ({
+        angle: (i / 10) * Math.PI * 2,
+        radius: 0.72 + (i % 3) * 0.34,
+        speed: 1.1 + (i % 4) * 0.28,
+        zOff: (i % 2 === 0 ? 1 : -1) * 0.14,
+      })),
+    [],
+  );
+
   useFrame((state, delta) => {
     const t = state.clock.elapsedTime;
     const isGathering = gatheringPhase === 'gathering' || gatheringPhase === 'entered';
@@ -394,27 +410,45 @@ function CouncilEntrancePortal({
       targetCharge,
       Math.min(1, delta * 8),
     );
-    portalUniforms.uTime.value = t;
+    portalUniforms.uTime.value = reducedMotion ? 0 : t;
 
-    const spinBoost = 1 + targetCharge * 5.2;
-    if (outerRingRef.current) {
-      outerRingRef.current.rotation.z += delta * 0.45 * spinBoost;
-    }
-    if (innerRingRef.current) {
-      innerRingRef.current.rotation.z -= delta * 0.72 * spinBoost;
-    }
-    if (crownHaloRef.current) {
-      crownHaloRef.current.rotation.z -= delta * (0.55 + targetCharge * 2.2);
-      crownHaloRef.current.position.y = 4.35 + Math.sin(t * 2.1) * 0.1 + targetCharge * 0.28;
-    }
-    if (keystoneRef.current) {
-      keystoneRef.current.rotation.y += delta * (0.9 + targetCharge * 3.0);
-      keystoneRef.current.position.y =
-        4.35 + Math.sin(t * 2.1) * 0.1 + targetCharge * 0.28;
+    const spinBoost = 1 + targetCharge * 5.6;
+    if (!reducedMotion) {
+      if (outerRingRef.current) {
+        outerRingRef.current.rotation.z += delta * 0.48 * spinBoost;
+      }
+      if (midRingRef.current) {
+        midRingRef.current.rotation.z -= delta * 0.65 * spinBoost;
+        midRingRef.current.rotation.y = Math.sin(t * 0.9) * 0.18;
+      }
+      if (innerRingRef.current) {
+        innerRingRef.current.rotation.z += delta * 0.88 * spinBoost;
+      }
+      if (crownHaloRef.current) {
+        crownHaloRef.current.rotation.y += delta * (0.95 + targetCharge * 2.8);
+        crownHaloRef.current.position.y = 4.38 + Math.sin(t * 2.1) * 0.12 + targetCharge * 0.3;
+      }
+      if (keystoneRef.current) {
+        keystoneRef.current.rotation.y += delta * (1.1 + targetCharge * 3.4);
+        keystoneRef.current.rotation.x = Math.sin(t * 1.4) * 0.15;
+        keystoneRef.current.position.y = 4.38 + Math.sin(t * 2.1) * 0.12 + targetCharge * 0.3;
+      }
+      if (vortexParticlesRef.current) {
+        vortexParticlesRef.current.rotation.z -= delta * (0.85 + targetCharge * 4.0);
+        const s = 1 - targetCharge * 0.25 + Math.sin(t * 2.5) * 0.04;
+        vortexParticlesRef.current.scale.setScalar(s);
+      }
+      if (shockwaveRef.current) {
+        const waveCycle = (t * (0.45 + targetCharge * 1.1)) % 1;
+        const scale = 0.72 + waveCycle * (0.55 + targetCharge * 0.45);
+        shockwaveRef.current.scale.set(scale, scale, 1);
+        const mat = shockwaveRef.current.material as THREE.MeshBasicMaterial;
+        mat.opacity = (1 - waveCycle) * (0.28 + targetCharge * 0.55);
+      }
     }
     if (portalLightRef.current) {
       portalLightRef.current.intensity =
-        (isDay ? 1.6 : 3.2) + targetCharge * 7.5;
+        (isDay ? 1.8 : 3.5) + Math.sin(t * 2.4) * 0.3 + targetCharge * 8.0;
     }
   });
 
@@ -443,12 +477,24 @@ function CouncilEntrancePortal({
     >
       {/* Stepped Circular Dais */}
       <mesh position={[0, 0.12, 0.4]} receiveShadow castShadow>
-        <cylinderGeometry args={[2.9, 3.25, 0.24, 32]} />
+        <cylinderGeometry args={[2.95, 3.3, 0.24, 36]} />
         <meshStandardMaterial color={stoneMatColor} roughness={0.62} metalness={0.22} />
       </mesh>
       <mesh position={[0, 0.28, 0.2]} receiveShadow castShadow>
-        <cylinderGeometry args={[2.1, 2.4, 0.16, 32]} />
+        <cylinderGeometry args={[2.15, 2.45, 0.16, 36]} />
         <meshStandardMaterial color={trimMatColor} roughness={0.5} metalness={0.35} />
+      </mesh>
+
+      {/* Expanding Dais Pulse Shockwave Ring */}
+      <mesh ref={shockwaveRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.37, 0.2]}>
+        <ringGeometry args={[1.95, 2.15, 42]} />
+        <meshBasicMaterial
+          color="#38bdf8"
+          transparent
+          opacity={0.32}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+        />
       </mesh>
 
       {/* Left & Right Sculpted Monolith Pillars */}
@@ -458,12 +504,16 @@ function CouncilEntrancePortal({
             <cylinderGeometry args={[0.28, 0.42, 3.0, 8]} />
             <meshStandardMaterial color={stoneMatColor} roughness={0.48} metalness={0.38} />
           </mesh>
+          <mesh position={[0, -1.3, 0]} castShadow>
+            <cylinderGeometry args={[0.48, 0.56, 0.35, 8]} />
+            <meshStandardMaterial color={trimMatColor} roughness={0.55} metalness={0.32} />
+          </mesh>
           <mesh position={[0, 0.4, 0.28]}>
-            <boxGeometry args={[0.12, 2.1, 0.08]} />
+            <boxGeometry args={[0.13, 2.15, 0.08]} />
             <meshStandardMaterial
               color="#38bdf8"
               emissive="#38bdf8"
-              emissiveIntensity={0.8 + holdProgress * 2.2}
+              emissiveIntensity={0.95 + holdProgress * 2.4}
             />
           </mesh>
         </group>
@@ -471,53 +521,95 @@ function CouncilEntrancePortal({
 
       {/* Sculpted Overhead Portal Arch */}
       <mesh position={[0, 2.2, 0]} castShadow receiveShadow>
-        <torusGeometry args={[1.82, 0.28, 14, 40, Math.PI]} />
+        <torusGeometry args={[1.82, 0.28, 14, 42, Math.PI]} />
         <meshPhysicalMaterial
           color={isDay ? '#e2e8f0' : '#334155'}
           metalness={0.55}
           roughness={0.28}
-          clearcoat={0.4}
+          clearcoat={0.45}
         />
       </mesh>
 
-      {/* Spinning Outer & Inner Energy Rings */}
+      {/* Triple Spinning Outer, Mid & Inner Energy Gyroscope Rings */}
       <mesh ref={outerRingRef} position={[0, 2.15, 0.08]}>
-        <torusGeometry args={[1.64, 0.045, 10, 48]} />
+        <torusGeometry args={[1.66, 0.045, 10, 48]} />
         <meshStandardMaterial
           color="#7c3aed"
           emissive="#8b5cf6"
-          emissiveIntensity={1.2 + holdProgress * 2.6}
+          emissiveIntensity={1.25 + holdProgress * 2.6}
         />
       </mesh>
 
-      <mesh ref={innerRingRef} position={[0, 2.15, 0.12]}>
-        <torusGeometry args={[1.38, 0.035, 10, 6]} />
+      <mesh ref={midRingRef} position={[0, 2.15, 0.1]}>
+        <torusGeometry args={[1.51, 0.028, 8, 36]} />
+        <meshStandardMaterial
+          color="#67e8f9"
+          emissive="#06b6d4"
+          emissiveIntensity={1.2 + holdProgress * 2.4}
+        />
+      </mesh>
+
+      <mesh ref={innerRingRef} position={[0, 2.15, 0.13]}>
+        <torusGeometry args={[1.36, 0.036, 10, 6]} />
         <meshStandardMaterial
           color="#38bdf8"
           emissive="#38bdf8"
-          emissiveIntensity={1.4 + holdProgress * 2.8}
+          emissiveIntensity={1.45 + holdProgress * 2.8}
         />
       </mesh>
 
-      {/* Levitating Faceted Keystone Crystal + Crown Halo */}
-      <mesh ref={keystoneRef} position={[0, 4.35, 0]} castShadow>
-        <octahedronGeometry args={[0.34, 0]} />
+      {/* Orbiting Vortex Energy Sparks inside the Aperture */}
+      <group ref={vortexParticlesRef} position={[0, 2.15, 0.16]}>
+        {vortexSeeds.map((seed, i) => (
+          <mesh
+            key={i}
+            position={[
+              Math.cos(seed.angle) * seed.radius,
+              Math.sin(seed.angle) * seed.radius,
+              seed.zOff,
+            ]}
+          >
+            <octahedronGeometry args={[0.055, 0]} />
+            <meshStandardMaterial
+              color={i % 2 === 0 ? '#67e8f9' : '#c4b5fd'}
+              emissive={i % 2 === 0 ? '#38bdf8' : '#8b5cf6'}
+              emissiveIntensity={1.9 + holdProgress * 1.8}
+            />
+          </mesh>
+        ))}
+      </group>
+
+      {/* Levitating Faceted Keystone Crystal + Crown Halo Satellites */}
+      <mesh ref={keystoneRef} position={[0, 4.38, 0]} castShadow>
+        <octahedronGeometry args={[0.36, 0]} />
         <meshStandardMaterial
           color="#a78bfa"
           emissive="#38bdf8"
-          emissiveIntensity={1.5 + holdProgress * 2.5}
-          roughness={0.15}
-          metalness={0.3}
+          emissiveIntensity={1.6 + holdProgress * 2.6}
+          roughness={0.14}
+          metalness={0.32}
         />
       </mesh>
-      <mesh ref={crownHaloRef} rotation={[Math.PI / 2.2, 0, 0]} position={[0, 4.35, 0]}>
-        <torusGeometry args={[0.62, 0.024, 8, 32]} />
-        <meshStandardMaterial
-          color="#38bdf8"
-          emissive="#818cf8"
-          emissiveIntensity={1.3 + holdProgress * 2.2}
-        />
-      </mesh>
+      <group ref={crownHaloRef} position={[0, 4.38, 0]}>
+        <mesh rotation={[Math.PI / 2.2, 0, 0]}>
+          <torusGeometry args={[0.66, 0.024, 8, 32]} />
+          <meshStandardMaterial
+            color="#38bdf8"
+            emissive="#818cf8"
+            emissiveIntensity={1.35 + holdProgress * 2.3}
+          />
+        </mesh>
+        {[0, 2.09, 4.18].map((a, idx) => (
+          <mesh key={idx} position={[Math.cos(a) * 0.66, 0, Math.sin(a) * 0.66]}>
+            <octahedronGeometry args={[0.075, 0]} />
+            <meshStandardMaterial
+              color="#67e8f9"
+              emissive="#38bdf8"
+              emissiveIntensity={1.85}
+            />
+          </mesh>
+        ))}
+      </group>
 
       {/* Portal Aperture Vortex Shader */}
       <mesh position={[0, 2.15, 0]}>
@@ -548,14 +640,14 @@ function CouncilEntrancePortal({
               if (r > 1.0) discard;
               float a = atan(p.y, p.x);
 
-              float swirl = sin(a * 5.0 - r * 9.0 + uTime * (2.5 + uCharge * 4.5));
-              float rings = cos(r * 14.0 - uTime * (2.0 + uCharge * 3.0)) * 0.5 + 0.5;
-              float coreGlow = exp(-r * r * mix(3.2, 1.3, uCharge));
-              float edge = smoothstep(0.68, 0.98, r) * (1.0 - smoothstep(0.96, 1.0, r));
+              float swirl = sin(a * 6.0 - r * 11.0 + uTime * (2.8 + uCharge * 4.8));
+              float rings = cos(r * 16.0 - uTime * (2.2 + uCharge * 3.4)) * 0.5 + 0.5;
+              float coreGlow = exp(-r * r * mix(2.9, 1.2, uCharge));
+              float edge = smoothstep(0.66, 0.98, r) * (1.0 - smoothstep(0.96, 1.0, r));
 
-              vec3 col = mix(uSecondary, uPrimary, rings * 0.65 + swirl * 0.2 + uCharge * 0.35);
-              float alpha = (coreGlow * (0.48 + uCharge * 0.52) + edge * 0.72 + rings * 0.16) * (1.0 - smoothstep(0.95, 1.0, r));
-              gl_FragColor = vec4(col * (1.1 + uCharge * 1.1), clamp(alpha, 0.0, 0.96));
+              vec3 col = mix(uSecondary, uPrimary, rings * 0.65 + swirl * 0.25 + uCharge * 0.35);
+              float alpha = (coreGlow * (0.52 + uCharge * 0.48) + edge * 0.78 + rings * 0.18) * (1.0 - smoothstep(0.95, 1.0, r));
+              gl_FragColor = vec4(col * (1.15 + uCharge * 1.15), clamp(alpha, 0.0, 0.97));
             }
           `}
         />
@@ -565,10 +657,115 @@ function CouncilEntrancePortal({
         ref={portalLightRef}
         position={[0, 2.2, 0.9]}
         color="#60a5fa"
-        intensity={isDay ? 1.6 : 3.2}
-        distance={14}
+        intensity={isDay ? 1.8 : 3.5}
+        distance={16}
         decay={2}
       />
+    </group>
+  );
+}
+
+/**
+ * Gently bobbing luminous lotus lanterns on the moat water + soaring sanctuary wisps.
+ */
+function SanctuaryAmbientLife({
+  isDay,
+  reducedMotion,
+}: {
+  isDay: boolean;
+  reducedMotion: boolean;
+}) {
+  const { qualityTier } = useWorldTheme();
+  const lotusGroupRef = useRef<THREE.Group | null>(null);
+  const wispGroupRef = useRef<THREE.Group | null>(null);
+
+  const lotusPositions = useMemo(() => {
+    const count = qualityTier === 'lite' ? 6 : 10;
+    return Array.from({ length: count }, (_, i) => {
+      const ang = (i / count) * Math.PI * 2 + 0.3;
+      const rad = 11.6 + (i % 3) * 0.95;
+      return {
+        x: Math.cos(ang) * rad,
+        z: Math.sin(ang) * rad,
+        phase: i * 1.1,
+      };
+    });
+  }, [qualityTier]);
+
+  const wispConfigs = useMemo(
+    () => [
+      { radius: 13.5, speed: 0.28, height: 6.2, phase: 0 },
+      { radius: 15.8, speed: -0.22, height: 7.4, phase: 2.1 },
+      { radius: 11.2, speed: 0.34, height: 5.5, phase: 4.3 },
+    ],
+    [],
+  );
+
+  useFrame((state) => {
+    if (reducedMotion) return;
+    const t = state.clock.elapsedTime;
+    if (lotusGroupRef.current) {
+      lotusGroupRef.current.children.forEach((child, i) => {
+        const lp = lotusPositions[i];
+        if (!lp) return;
+        child.position.y = -0.34 + Math.sin(t * 1.6 + lp.phase) * 0.045;
+        child.rotation.y = t * 0.25 + lp.phase;
+      });
+    }
+    if (wispGroupRef.current) {
+      wispGroupRef.current.children.forEach((child, i) => {
+        const wc = wispConfigs[i];
+        if (!wc) return;
+        const ang = t * wc.speed + wc.phase;
+        child.position.set(
+          Math.cos(ang) * wc.radius,
+          wc.height + Math.sin(t * 1.8 + wc.phase) * 0.65,
+          Math.sin(ang) * wc.radius,
+        );
+        child.rotation.y = -ang + (wc.speed > 0 ? 0 : Math.PI);
+      });
+    }
+  });
+
+  return (
+    <group name="SanctuaryAmbientLife">
+      <group ref={lotusGroupRef}>
+        {lotusPositions.map((lp, idx) => (
+          <group key={idx} position={[lp.x, -0.34, lp.z]}>
+            <mesh>
+              <cylinderGeometry args={[0.36, 0.36, 0.04, 8]} />
+              <meshStandardMaterial color={isDay ? '#2e7d52' : '#134e4a'} roughness={0.75} />
+            </mesh>
+            <mesh position={[0, 0.11, 0]}>
+              <octahedronGeometry args={[0.14, 0]} />
+              <meshStandardMaterial
+                color={idx % 2 === 0 ? '#fde68a' : '#7dd3fc'}
+                emissive={idx % 2 === 0 ? '#fbbf24' : '#38bdf8'}
+                emissiveIntensity={isDay ? 0.55 : 1.75}
+              />
+            </mesh>
+          </group>
+        ))}
+      </group>
+
+      <group ref={wispGroupRef}>
+        {wispConfigs.map((wc, idx) => (
+          <group key={idx} position={[wc.radius, wc.height, 0]}>
+            <mesh>
+              <octahedronGeometry args={[0.16, 0]} />
+              <meshStandardMaterial
+                color={isDay ? '#fef3c7' : '#bae6fd'}
+                emissive={idx === 1 ? '#a78bfa' : '#38bdf8'}
+                emissiveIntensity={isDay ? 0.8 : 2.1}
+              />
+            </mesh>
+            <mesh rotation={[Math.PI / 2, 0, 0]} scale={[1.8, 0.5, 1]}>
+              <torusGeometry args={[0.22, 0.02, 6, 16]} />
+              <meshBasicMaterial color={idx === 1 ? '#c4b5fd' : '#7dd3fc'} transparent opacity={0.7} />
+            </mesh>
+          </group>
+        ))}
+      </group>
     </group>
   );
 }
@@ -577,6 +774,7 @@ export function PlaygroundWorld({
   providers,
   gatheringPhase,
   holdProgress,
+  selectedCharacterId,
   showLabels = true,
   onSelectCharacter,
   onPortalPointerDown,
@@ -586,6 +784,8 @@ export function PlaygroundWorld({
   const { isDay, reducedMotion } = useWorldTheme();
   const { camera } = useThree();
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
+  const plazaRunesRef = useRef<THREE.Group | null>(null);
+  const lanternGemsRef = useRef<THREE.Group | null>(null);
   const enteredCountRef = useRef(0);
   const completionFiredRef = useRef(false);
 
@@ -755,6 +955,20 @@ export function PlaygroundWorld({
     return map;
   }, []);
 
+  useFrame((state, delta) => {
+    if (reducedMotion) return;
+    const t = state.clock.elapsedTime;
+    if (plazaRunesRef.current) {
+      plazaRunesRef.current.rotation.y += delta * (0.14 + holdProgress * 0.85);
+    }
+    if (lanternGemsRef.current) {
+      lanternGemsRef.current.children.forEach((gem, idx) => {
+        gem.rotation.y += delta * 1.15;
+        gem.position.y = 1.05 + Math.sin(t * 2.2 + idx * 0.85) * 0.08;
+      });
+    }
+  });
+
   return (
     <>
       <OrbitControls
@@ -767,6 +981,10 @@ export function PlaygroundWorld({
         minDistance={7.5}
         maxDistance={25}
         target={[0, 1.0, -1.4]}
+        onStart={() => {
+          gsap.killTweensOf(camera.position);
+          if (controlsRef.current) gsap.killTweensOf(controlsRef.current.target);
+        }}
       />
 
       {/* Sculpted Sanctuary Terrain */}
@@ -791,8 +1009,8 @@ export function PlaygroundWorld({
           <ringGeometry args={[3.4, 3.56, 48]} />
           <meshStandardMaterial
             color={isDay ? '#94a3b8' : '#38bdf8'}
-            emissive={isDay ? '#38bdf8' : '#38bdf8'}
-            emissiveIntensity={isDay ? 0.25 : 0.95 + holdProgress * 1.4}
+            emissive="#38bdf8"
+            emissiveIntensity={isDay ? 0.3 : 1.05 + holdProgress * 1.5}
           />
         </mesh>
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.125, 0]}>
@@ -800,49 +1018,107 @@ export function PlaygroundWorld({
           <meshStandardMaterial
             color={isDay ? '#a78bfa' : '#8b5cf6'}
             emissive="#7c3aed"
-            emissiveIntensity={isDay ? 0.2 : 0.75 + holdProgress * 1.4}
+            emissiveIntensity={isDay ? 0.25 : 0.85 + holdProgress * 1.5}
           />
         </mesh>
 
-        {/* Southern Wooden & Stone Bridge across the Moat */}
-        <group position={[0, 0.05, 11.8]}>
-          <mesh castShadow receiveShadow>
-            <boxGeometry args={[2.8, 0.22, 7.6]} />
-            <meshStandardMaterial color={isDay ? '#9a7b56' : '#26324d'} roughness={0.78} />
-          </mesh>
-          {[-1.25, 1.25].map((rx, idx) => (
-            <mesh key={idx} position={[rx, 0.45, 0]} castShadow>
-              <boxGeometry args={[0.14, 0.68, 7.5]} />
-              <meshStandardMaterial color={isDay ? '#64748b' : '#334155'} roughness={0.6} />
-            </mesh>
+        {/* Rotating Inlaid Plaza Rune Nodes */}
+        <group ref={plazaRunesRef} position={[0, 0.132, 0]}>
+          {Array.from({ length: 12 }, (_, i) => {
+            const ang = (i / 12) * Math.PI * 2;
+            return (
+              <mesh
+                key={i}
+                position={[Math.cos(ang) * 4.88, 0, Math.sin(ang) * 4.88]}
+                rotation={[-Math.PI / 2, 0, -ang]}
+              >
+                <planeGeometry args={[0.22, 0.55]} />
+                <meshStandardMaterial
+                  color={i % 2 === 0 ? '#38bdf8' : '#a78bfa'}
+                  emissive={i % 2 === 0 ? '#38bdf8' : '#7c3aed'}
+                  emissiveIntensity={isDay ? 0.45 : 1.25 + holdProgress * 1.5}
+                />
+              </mesh>
+            );
+          })}
+        </group>
+
+        {/* Sculpted Arched Sanctuary Bridge across the Moat */}
+        <group position={[0, 0.04, 11.8]}>
+          {[-2.4, -1.2, 0, 1.2, 2.4].map((zOff, idx) => {
+            const archY = Math.cos((zOff / 3.4) * (Math.PI * 0.42)) * 0.38;
+            return (
+              <mesh key={idx} position={[0, archY, zOff]} castShadow receiveShadow>
+                <boxGeometry args={[2.8, 0.24, 1.32]} />
+                <meshStandardMaterial color={isDay ? '#9a7b56' : '#26324d'} roughness={0.76} />
+              </mesh>
+            );
+          })}
+          {[-1.26, 1.26].map((rx, idx) => (
+            <group key={idx} position={[rx, 0.58, 0]}>
+              <mesh castShadow>
+                <boxGeometry args={[0.14, 0.56, 7.2]} />
+                <meshStandardMaterial color={isDay ? '#64748b' : '#334155'} roughness={0.58} />
+              </mesh>
+              {[-3.4, 0, 3.4].map((pz, pIdx) => (
+                <mesh key={pIdx} position={[0, 0.32, pz]} castShadow>
+                  <cylinderGeometry args={[0.1, 0.14, 0.82, 8]} />
+                  <meshStandardMaterial color={isDay ? '#94a3b8' : '#1e293b'} roughness={0.55} />
+                </mesh>
+              ))}
+            </group>
           ))}
         </group>
 
-        {/* Sanctuary Lantern Pillars */}
+        {/* Sanctuary Lantern Pillars + Floating Crystal Cores */}
         {lanternAngles.map((ang, idx) => {
           const lx = Math.cos(ang) * 7.35;
           const lz = Math.sin(ang) * 7.35;
           return (
             <group key={idx} position={[lx, 0.12, lz]}>
-              <mesh position={[0, 0.45, 0]} castShadow>
-                <cylinderGeometry args={[0.1, 0.14, 0.9, 8]} />
-                <meshStandardMaterial color={isDay ? '#94a3b8' : '#1e293b'} roughness={0.6} />
+              <mesh position={[0, 0.08, 0]} castShadow>
+                <cylinderGeometry args={[0.2, 0.25, 0.16, 8]} />
+                <meshStandardMaterial color={isDay ? '#64748b' : '#334155'} roughness={0.62} />
               </mesh>
-              <mesh position={[0, 1.0, 0]}>
-                <octahedronGeometry args={[0.16, 0]} />
+              <mesh position={[0, 0.46, 0]} castShadow>
+                <cylinderGeometry args={[0.1, 0.14, 0.72, 8]} />
+                <meshStandardMaterial color={isDay ? '#94a3b8' : '#1e293b'} roughness={0.58} />
+              </mesh>
+              <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.82, 0]}>
+                <ringGeometry args={[0.16, 0.22, 16]} />
                 <meshStandardMaterial
-                  color={isDay ? '#fde68a' : '#7dd3fc'}
+                  color={isDay ? '#fbbf24' : '#38bdf8'}
                   emissive={isDay ? '#fbbf24' : '#38bdf8'}
-                  emissiveIntensity={isDay ? 0.45 : 1.75}
+                  emissiveIntensity={0.8}
                 />
               </mesh>
             </group>
           );
         })}
+
+        <group ref={lanternGemsRef}>
+          {lanternAngles.map((ang, idx) => {
+            const lx = Math.cos(ang) * 7.35;
+            const lz = Math.sin(ang) * 7.35;
+            return (
+              <mesh key={idx} position={[lx, 1.05, lz]}>
+                <octahedronGeometry args={[0.17, 0]} />
+                <meshStandardMaterial
+                  color={isDay ? '#fde68a' : '#7dd3fc'}
+                  emissive={isDay ? '#fbbf24' : '#38bdf8'}
+                  emissiveIntensity={isDay ? 0.55 : 1.85}
+                />
+              </mesh>
+            );
+          })}
+        </group>
       </group>
 
       {/* Animated Lagoon Water */}
       <SanctuaryWater isDay={isDay} reducedMotion={reducedMotion} />
+
+      {/* Floating Lotus Lanterns & Gliding Sky Wisps */}
+      <SanctuaryAmbientLife isDay={isDay} reducedMotion={reducedMotion} />
 
       {/* Instanced Trees & Flora */}
       <SanctuaryVegetation isDay={isDay} reducedMotion={reducedMotion} />
@@ -859,6 +1135,7 @@ export function PlaygroundWorld({
         isDay={isDay}
         holdProgress={holdProgress}
         gatheringPhase={gatheringPhase}
+        reducedMotion={reducedMotion}
         onPointerDown={onPortalPointerDown}
         onPointerUpOrLeave={onPortalPointerUpOrLeave}
       />
@@ -882,6 +1159,7 @@ export function PlaygroundWorld({
         holdProgress={holdProgress}
         reducedMotion={reducedMotion}
         showLabels={showLabels}
+        selected={selectedCharacterId === 'nova'}
         onSelect={onSelectCharacter}
         onEnteredPortal={handleCharacterEntered}
       />
@@ -908,6 +1186,7 @@ export function PlaygroundWorld({
             holdProgress={holdProgress}
             reducedMotion={reducedMotion}
             showLabels={showLabels}
+            selected={selectedCharacterId === prov.providerId}
             onSelect={onSelectCharacter}
             onEnteredPortal={handleCharacterEntered}
           />

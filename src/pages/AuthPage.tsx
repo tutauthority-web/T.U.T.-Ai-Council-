@@ -3,7 +3,13 @@ import { ArrowLeft, MailCheck, RefreshCw } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import type { AppRoute } from '../components/AppShell';
 
-export function AuthPage({ onNavigate }: { onNavigate: (route: AppRoute) => void }) {
+export function AuthPage({
+  onNavigate,
+  onBack,
+}: {
+  onNavigate: (route: AppRoute) => void;
+  onBack?: () => void;
+}) {
   const {
     user,
     signInWithGoogle,
@@ -147,11 +153,11 @@ export function AuthPage({ onNavigate }: { onNavigate: (route: AppRoute) => void
       <div className="w-full max-w-md space-y-6">
         <button
           type="button"
-          onClick={() => onNavigate('dashboard')}
-          className="inline-flex items-center gap-2 text-sm text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
+          onClick={() => (onBack ? onBack() : onNavigate('dashboard'))}
+          className="inline-flex items-center gap-2 min-h-[44px] px-2 -ml-2 rounded-xl text-sm text-slate-400 hover:text-slate-100 hover:bg-slate-800/40 transition-colors cursor-pointer"
         >
           <ArrowLeft className="w-4 h-4" />
-          Back to AI Playground
+          Back
         </button>
 
         <div className="bg-[#111827] border border-slate-800 rounded-xl p-7 space-y-6">

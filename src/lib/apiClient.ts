@@ -5,7 +5,6 @@ import type {
   EffectiveSubscriptionInfo,
   GatewayCheckoutOrder,
   IntelligenceLevel,
-  MlaMemberInfo,
   ModelInfo,
   PaymentSubmissionDoc,
   PreflightReport,
@@ -16,7 +15,7 @@ import type {
   RunMessageInput,
   SmartSelectResult,
   SubscriptionCycle,
-  TutWalletWebConfig,
+  TutGatewayConfig,
   UserSubscriptionDoc,
 } from '../shared/types';
 
@@ -317,95 +316,6 @@ export async function fetchSubscriptionState(): Promise<{
   };
 }
 
-export interface TutGatewayPublicConfig {
-  checkoutUrl: string;
-  verifyReceiptUrl: string;
-  mlaConfigured: boolean;
-  walletFirebaseConfig: TutWalletWebConfig | null;
-}
-
-export async function fetchTutGatewayConfigApi(): Promise<TutGatewayPublicConfig> {
-  const headers = await getAuthHeaders();
-  const res = await fetch('/api/payments/tut-gateway/config', { headers });
-  const data = (await res.json()) as Partial<TutGatewayPublicConfig> & { error?: string };
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to load T.U.T. Wallet & Checkout config.');
-  }
-  return {
-    checkoutUrl: data.checkoutUrl || '',
-    verifyReceiptUrl: data.verifyReceiptUrl || '',
-    mlaConfigured: Boolean(data.mlaConfigured),
-    walletFirebaseConfig: data.walletFirebaseConfig || null,
-  };
-}
-
-export async function checkMlaMembershipApi(tutWalletIdToken?: string): Promise<{
-  configured: boolean;
-  found: boolean;
-  member: MlaMemberInfo | null;
-  needsWalletSignIn?: boolean;
-  error: string | null;
-}> {
-  const headers = await getAuthHeaders();
-  const res = await fetch('/api/payments/mla/check', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(tutWalletIdToken ? { tutWalletIdToken } : {}),
-  });
-  const data = (await res.json()) as {
-    configured?: boolean;
-    found?: boolean;
-    member?: MlaMemberInfo | null;
-    needsWalletSignIn?: boolean;
-    error?: string | null;
-  };
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to check T.U.T. MLA account.');
-  }
-  return {
-    configured: Boolean(data.configured),
-    found: Boolean(data.found),
-    member: data.member || null,
-    needsWalletSignIn: Boolean(data.needsWalletSignIn),
-    error: data.error || null,
-  };
-}
-
-export async function purchasePremiumWithMlaApi(
-  cycle: SubscriptionCycle,
-  tutWalletIdToken?: string,
-): Promise<{
-  ok: boolean;
-  payment: PaymentSubmissionDoc;
-  subscription: EffectiveSubscriptionInfo;
-  updatedBalanceBdt: number;
-}> {
-  const headers = await getAuthHeaders();
-  const res = await fetch('/api/payments/mla/purchase', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(
-      tutWalletIdToken ? { cycle, tutWalletIdToken } : { cycle },
-    ),
-  });
-  const data = (await res.json()) as {
-    ok?: boolean;
-    payment?: PaymentSubmissionDoc;
-    subscription?: EffectiveSubscriptionInfo;
-    updatedBalanceBdt?: number;
-    error?: string;
-  };
-  if (!res.ok || !data.subscription || !data.payment) {
-    throw new Error(data.error || 'MLA payment failed.');
-  }
-  return {
-    ok: true,
-    payment: data.payment,
-    subscription: data.subscription,
-    updatedBalanceBdt: Number(data.updatedBalanceBdt ?? 0),
-  };
-}
-
 export async function submitManualWalletPaymentApi(payload: {
   method: 'bkash' | 'nagad';
   cycle: SubscriptionCycle;
@@ -425,7 +335,7 @@ export async function submitManualWalletPaymentApi(payload: {
   return data.payment;
 }
 
-export async function initTutGatewayCheckoutApi(
+export async function createTutGatewaySessionApi(
   cycle: SubscriptionCycle,
   returnUrl: string,
 ): Promise<{
@@ -434,7 +344,7 @@ export async function initTutGatewayCheckoutApi(
   checkoutUrl: string;
 }> {
   const headers = await getAuthHeaders();
-  const res = await fetch('/api/payments/tut-gateway/init', {
+  const res = await fetch('/api/payments/tut-gateway/create-session', {
     method: 'POST',
     headers,
     body: JSON.stringify({ cycle, returnUrl }),
@@ -446,7 +356,7 @@ export async function initTutGatewayCheckoutApi(
     error?: string;
   };
   if (!res.ok || !data.order || !data.checkoutUrl) {
-    throw new Error(data.error || 'Failed to start T.U.T. Hosted Checkout.');
+    throw new Error(data.error || 'Failed to create T.U.T. Checkout session.');
   }
   return {
     ok: true,
@@ -455,60 +365,41 @@ export async function initTutGatewayCheckoutApi(
   };
 }
 
-export async function verifyTutGatewayCheckoutApi(
-  orderId: string,
-  returnParams: Record<string, string>,
-): Promise<{
+export async function verifyTutGatewayPaymentApi(payload: {
+  token?: string;
+  orderId?: string;
+  tutStatus?: string;
+}): Promise<{
   verified: boolean;
-  proxyBlocked?: boolean;
   order?: GatewayCheckoutOrder;
   payment?: PaymentSubmissionDoc;
   subscription?: EffectiveSubscriptionInfo;
-  error?: string;
+  memoId?: string;
 }> {
   const headers = await getAuthHeaders();
   const res = await fetch('/api/payments/tut-gateway/verify', {
     method: 'POST',
     headers,
-    body: JSON.stringify({ orderId, returnParams }),
+    body: JSON.stringify(payload),
   });
   const data = (await res.json()) as {
     verified?: boolean;
-    proxyBlocked?: boolean;
     order?: GatewayCheckoutOrder;
     payment?: PaymentSubmissionDoc;
     subscription?: EffectiveSubscriptionInfo;
+    memoId?: string;
     error?: string;
   };
-  if (!res.ok && !data.proxyBlocked) {
-    throw new Error(data.error || 'T.U.T. receipt verification failed.');
+  if (!res.ok || !data.verified) {
+    throw new Error(data.error || 'T.U.T. payment verification failed.');
   }
   return {
-    verified: Boolean(data.verified),
-    proxyBlocked: Boolean(data.proxyBlocked),
+    verified: true,
     order: data.order,
     payment: data.payment,
     subscription: data.subscription,
-    error: data.error,
+    memoId: data.memoId,
   };
-}
-
-export async function submitPendingGatewayReceiptApi(payload: {
-  orderId: string;
-  receiptRef?: string;
-  note?: string;
-}): Promise<PaymentSubmissionDoc> {
-  const headers = await getAuthHeaders();
-  const res = await fetch('/api/payments/tut-gateway/submit-receipt', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(payload),
-  });
-  const data = (await res.json()) as { payment?: PaymentSubmissionDoc; error?: string };
-  if (!res.ok || !data.payment) {
-    throw new Error(data.error || 'Failed to submit receipt for Admin review.');
-  }
-  return data.payment;
 }
 
 // --- Admin Shared Pool, Payment Review & MLA Config ---
@@ -639,47 +530,28 @@ export async function reviewAdminPayment(
   };
 }
 
-export interface MlaConfigInfo {
-  projectId: string;
-  firestoreDatabaseId: string;
-  membersCollection: string;
-  emailField: string;
-  balanceField: string;
-  checkoutUrl: string;
-  verifyReceiptUrl: string;
-  gatewayUrl: string;
-  authDomain: string;
-  appId: string;
-  storageBucket: string;
-  messagingSenderId: string;
-  apiKey?: string;
-  hasApiKey?: boolean;
-  apiKeyPreview?: string | null;
-  configured: boolean;
-}
-
-export async function fetchAdminMlaConfig(): Promise<MlaConfigInfo> {
+export async function fetchAdminGatewayConfig(): Promise<TutGatewayConfig> {
   const headers = await getAuthHeaders();
-  const res = await fetch('/api/admin/mla-config', { headers });
-  const data = (await res.json()) as { config?: MlaConfigInfo; error?: string };
+  const res = await fetch('/api/admin/gateway-config', { headers });
+  const data = (await res.json()) as { config?: TutGatewayConfig; error?: string };
   if (!res.ok || !data.config) {
-    throw new Error(data.error || 'Failed to load MLA configuration.');
+    throw new Error(data.error || 'Failed to load T.U.T. Gateway configuration.');
   }
   return data.config;
 }
 
-export async function saveAdminMlaConfig(
-  payload: Partial<Omit<MlaConfigInfo, 'configured' | 'hasApiKey' | 'apiKeyPreview'>>,
-): Promise<MlaConfigInfo> {
+export async function saveAdminGatewayConfig(
+  payload: Partial<TutGatewayConfig>,
+): Promise<TutGatewayConfig> {
   const headers = await getAuthHeaders();
-  const res = await fetch('/api/admin/mla-config', {
+  const res = await fetch('/api/admin/gateway-config', {
     method: 'POST',
     headers,
     body: JSON.stringify(payload),
   });
-  const data = (await res.json()) as { config?: MlaConfigInfo; error?: string };
+  const data = (await res.json()) as { config?: TutGatewayConfig; error?: string };
   if (!res.ok || !data.config) {
-    throw new Error(data.error || 'Failed to save MLA configuration.');
+    throw new Error(data.error || 'Failed to save T.U.T. Gateway configuration.');
   }
   return data.config;
 }
@@ -689,7 +561,7 @@ export interface AdminPortalOverview {
   subscriptions: UserSubscriptionDoc[];
   gatewayOrders: GatewayCheckoutOrder[];
   connections: ProviderConnectionSummary[];
-  mlaConfig: MlaConfigInfo;
+  gatewayConfig: TutGatewayConfig;
 }
 
 export async function fetchAdminPortalOverviewApi(): Promise<AdminPortalOverview> {
@@ -704,22 +576,10 @@ export async function fetchAdminPortalOverviewApi(): Promise<AdminPortalOverview
     subscriptions: data.subscriptions || [],
     gatewayOrders: data.gatewayOrders || [],
     connections: data.connections || [],
-    mlaConfig: data.mlaConfig || {
-      projectId: '',
-      firestoreDatabaseId: '(default)',
-      membersCollection: 'members',
-      emailField: 'email',
-      balanceField: 'balance',
-      checkoutUrl: '',
-      verifyReceiptUrl: '',
-      gatewayUrl: '',
-      authDomain: '',
-      appId: '',
-      storageBucket: '',
-      messagingSenderId: '',
-      hasApiKey: false,
-      apiKeyPreview: null,
-      configured: false,
+    gatewayConfig: data.gatewayConfig || {
+      gatewayBaseUrl: 'https://t-u-t-money-lending-authority-apkma.vercel.app',
+      merchantId: 'tut-ai-council',
+      merchantName: 'T.U.T AI Council',
     },
   };
 }

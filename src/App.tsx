@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppLoadingScreen } from './components/AppLoadingScreen';
-import type { AppRoute } from './components/AppShell';
+import { PRIMARY_ROOT_ROUTES, type AppRoute } from './components/AppShell';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { PremiumPromoModal } from './components/PremiumPromoModal';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -11,60 +11,26 @@ import { ConnectionsPage } from './pages/ConnectionsPage';
 import { CouncilRoomPage } from './pages/CouncilRoomPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { HistoryPage } from './pages/HistoryPage';
-import { LandingPage } from './pages/LandingPage';
 import { ModelLibraryPage } from './pages/ModelLibraryPage';
 import { NewCouncilPage } from './pages/NewCouncilPage';
-import { PremiumPage, TUT_GATEWAY_PENDING_KEY } from './pages/PremiumPage';
-import { SettingsPage } from './pages/SettingsPage';
-import { UsageBillingPage } from './pages/UsageBillingPage';
-import { UserPortalPage } from './pages/UserPortalPage';
+import { PremiumPage, type TutGatewayReturnParams } from './pages/PremiumPage';
+import { UserPortalPage, type PortalTab } from './pages/UserPortalPage';
 import type { DiscussionMode } from './shared/types';
 
-function readGatewayReturnFromLocation(): Record<string, string> | null {
+function readGatewayReturnFromLocation(): TutGatewayReturnParams | null {
   if (typeof window === 'undefined') return null;
   const search = new URLSearchParams(window.location.search);
-  let hasGatewaySignal =
-    search.has('orderId') ||
-    search.has('order_id') ||
-    search.has('tut_status') ||
-    search.has('receipt') ||
-    search.has('receiptId') ||
-    search.has('trxId') ||
-    search.has('transactionId') ||
-    search.has('proof') ||
-    search.has('paid') ||
-    search.has('cancelled') ||
-    search.has('canceled');
-
-  let pendingOrderId = '';
-  try {
-    const raw = window.sessionStorage.getItem(TUT_GATEWAY_PENDING_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as { orderId?: string };
-      if (parsed?.orderId) pendingOrderId = parsed.orderId;
-    }
-  } catch {
-    pendingOrderId = '';
-  }
-
-  if (
-    !hasGatewaySignal &&
-    pendingOrderId &&
-    (search.has('status') || search.has('payment_status') || search.has('token'))
-  ) {
-    hasGatewaySignal = true;
-  }
+  const isCallbackPath = window.location.pathname === '/payment-callback';
+  const hasGatewaySignal =
+    isCallbackPath || search.has('tut_token') || search.has('tut_status');
 
   if (!hasGatewaySignal) return null;
 
-  const captured: Record<string, string> = {};
-  search.forEach((value, key) => {
-    captured[key] = value;
-  });
-  if (!captured.orderId && !captured.order_id && pendingOrderId) {
-    captured.orderId = pendingOrderId;
-  }
-  return Object.keys(captured).length > 0 ? captured : null;
+  const tutToken = (search.get('tut_token') || search.get('token') || '').trim() || undefined;
+  const tutStatus = (search.get('tut_status') || search.get('status') || '').trim() || undefined;
+  const orderId = (search.get('orderId') || search.get('order_id') || '').trim() || undefined;
+
+  return { tutToken, tutStatus, orderId };
 }
 
 const PROMO_SESSION_KEY = 'tut_premium_promo_seen';
@@ -96,14 +62,22 @@ function markPromoSeen(): void {
   }
 }
 
+function resolvePortalTabFromRoute(route: AppRoute): PortalTab {
+  if (route === 'usage') return 'usage';
+  if (route === 'settings') return 'settings';
+  return 'account';
+}
+
 function AppRouter() {
   const { user, authReady, subscription, isPremium, isAdmin } = useAuth();
-  const [gatewayReturnParams, setGatewayReturnParams] = useState<Record<string, string> | null>(
+  const [gatewayReturnParams, setGatewayReturnParams] = useState<TutGatewayReturnParams | null>(
     () => readGatewayReturnFromLocation(),
   );
   const [route, setRoute] = useState<AppRoute>(() =>
     readGatewayReturnFromLocation() ? 'premium' : 'dashboard',
   );
+  const [historyStack, setHistoryStack] = useState<AppRoute[]>([]);
+  const [portalTab, setPortalTab] = useState<PortalTab>('account');
   const [activeCouncilId, setActiveCouncilId] = useState<string>('');
   const [autoPrompt, setAutoPrompt] = useState<string | null>(null);
   const [draftModels, setDraftModels] = useState<string[]>([]);
@@ -114,8 +88,12 @@ function AppRouter() {
   const dwellCompleteRef = useRef(false);
 
   useEffect(() => {
-    if (gatewayReturnParams && typeof window !== 'undefined' && window.location.search) {
-      window.history.replaceState({}, document.title, window.location.pathname);
+    if (
+      gatewayReturnParams &&
+      typeof window !== 'undefined' &&
+      (window.location.pathname === '/payment-callback' || window.location.search)
+    ) {
+      window.history.replaceState({}, document.title, '/');
     }
   }, [gatewayReturnParams]);
 
@@ -164,12 +142,48 @@ function AppRouter() {
     }
   }, [promoEligible, hasInteracted]);
 
-  const navigate = (nextRoute: AppRoute, councilId?: string) => {
-    setRoute(nextRoute);
-    if (councilId) {
-      setActiveCouncilId(councilId);
+  const navigate = useCallback(
+    (nextRoute: AppRoute, councilId?: string) => {
+      if (nextRoute === 'usage' || nextRoute === 'settings') {
+        setPortalTab(resolvePortalTabFromRoute(nextRoute));
+        nextRoute = 'portal';
+      } else if (nextRoute === 'portal') {
+        setPortalTab('account');
+      }
+
+      setRoute((prev) => {
+        if (prev !== nextRoute) {
+          if (PRIMARY_ROOT_ROUTES.has(nextRoute)) {
+            setHistoryStack([]);
+          } else {
+            setHistoryStack((stack) => [...stack.slice(-6), prev]);
+          }
+        }
+        return nextRoute;
+      });
+
+      if (councilId) {
+        setActiveCouncilId(councilId);
+      }
+    },
+    [],
+  );
+
+  const goBack = useCallback(() => {
+    if (historyStack.length > 0) {
+      const target = historyStack[historyStack.length - 1];
+      setHistoryStack((stack) => stack.slice(0, -1));
+      setRoute(target);
+      return;
     }
-  };
+    if (route === 'council-room') {
+      setRoute('history');
+    } else if (route === 'admin') {
+      setRoute('portal');
+    } else {
+      setRoute('dashboard');
+    }
+  }, [historyStack, route]);
 
   let pageContent: React.ReactNode;
 
@@ -180,15 +194,13 @@ function AppRouter() {
         progress={32}
       />
     );
-  } else if (route === 'landing') {
-    pageContent = <LandingPage onNavigate={navigate} />;
   } else if (route === 'dashboard') {
     pageContent = (
       <DashboardPage
         onNavigate={navigate}
         onEnterNewCouncil={(mode) => {
           setDraftMode(mode);
-          setRoute(user && user.emailVerified ? 'new-council' : 'auth');
+          navigate(user && user.emailVerified ? 'new-council' : 'auth');
         }}
       />
     );
@@ -199,7 +211,7 @@ function AppRouter() {
         onStartCouncilWithSelection={(models, mod) => {
           setDraftModels(models);
           setDraftModerator(mod);
-          setRoute(user && user.emailVerified ? 'new-council' : 'auth');
+          navigate(user && user.emailVerified ? 'new-council' : 'auth');
         }}
       />
     );
@@ -218,15 +230,15 @@ function AppRouter() {
           onNavigate={navigate}
           onEnterNewCouncil={(mode) => {
             setDraftMode(mode);
-            setRoute('new-council');
+            navigate('new-council');
           }}
         />
       );
     } else {
-      pageContent = <AuthPage onNavigate={navigate} />;
+      pageContent = <AuthPage onNavigate={navigate} onBack={goBack} />;
     }
   } else if (route === 'connections') {
-    pageContent = <ConnectionsPage onNavigate={navigate} />;
+    pageContent = <ConnectionsPage onNavigate={navigate} onBack={goBack} />;
   } else if (route === 'new-council') {
     pageContent = (
       <NewCouncilPage
@@ -234,12 +246,14 @@ function AppRouter() {
         initialModeratorModel={draftModerator}
         initialMode={draftMode}
         onNavigate={navigate}
+        onBack={goBack}
         onCreatedAndStart={(councilId, promptText) => {
           setDraftModels([]);
           setDraftModerator(undefined);
           setDraftMode('chat');
           setActiveCouncilId(councilId);
           setAutoPrompt(promptText.trim() ? promptText : null);
+          setHistoryStack(['history']);
           setRoute('council-room');
         }}
       />
@@ -251,18 +265,22 @@ function AppRouter() {
         initialAutoPrompt={autoPrompt}
         onClearInitialPrompt={() => setAutoPrompt(null)}
         onNavigate={navigate}
+        onBack={goBack}
       />
     );
   } else if (route === 'history') {
     pageContent = <HistoryPage onNavigate={navigate} />;
-  } else if (route === 'portal') {
-    pageContent = <UserPortalPage onNavigate={navigate} />;
   } else if (route === 'admin') {
-    pageContent = <AdminPortalPage onNavigate={navigate} />;
-  } else if (route === 'usage') {
-    pageContent = <UsageBillingPage onNavigate={navigate} />;
+    pageContent = <AdminPortalPage onNavigate={navigate} onBack={goBack} />;
   } else {
-    pageContent = <SettingsPage onNavigate={navigate} />;
+    // Unified Portal (Account & Receipts | Usage & Guardrails | Settings)
+    pageContent = (
+      <UserPortalPage
+        onNavigate={navigate}
+        activeTab={portalTab}
+        onChangeTab={setPortalTab}
+      />
+    );
   }
 
   return (

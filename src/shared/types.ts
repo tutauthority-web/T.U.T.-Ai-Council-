@@ -273,8 +273,9 @@ export const PAYMENT_ACCOUNTS = {
   },
 } as const;
 
-export const TUT_HOSTED_CHECKOUT_URL =
-  'https://ais-pre-bo5opclp4lvfjrzc2bxtnd-813806389941.asia-southeast1.run.app/';
+export const TUT_GATEWAY_BASE_URL =
+  'https://t-u-t-money-lending-authority-apkma.vercel.app';
+export const TUT_MERCHANT_ID = 'tut-ai-council';
 export const TUT_MERCHANT_NAME = 'T.U.T AI Council';
 
 export type PaymentMethod = 'mla' | 'bkash' | 'nagad';
@@ -286,11 +287,14 @@ export interface GatewayCheckoutOrder {
   email: string;
   cycle: SubscriptionCycle;
   amountBdt: number;
-  merchant: string;
+  merchantId: string;
+  merchantName: string;
   status: 'pending' | 'verified' | 'failed';
   createdAt: string;
   verifiedAt?: string;
+  memoId?: string;
   receiptRef?: string;
+  tokenHash?: string;
 }
 
 export interface EffectiveSubscriptionInfo {
@@ -304,25 +308,10 @@ export interface EffectiveSubscriptionInfo {
   isAdminAccount?: boolean;
 }
 
-export interface MlaMemberInfo {
-  memberId: string;
-  email: string;
-  displayName: string;
-  accountNumber?: string;
-  cardLabel?: string;
-  balanceBdt: number;
-  status: string;
-  syncedAt: string;
-}
-
-export interface TutWalletWebConfig {
-  projectId: string;
-  firestoreDatabaseId: string;
-  apiKey: string;
-  authDomain: string;
-  appId: string;
-  storageBucket?: string;
-  messagingSenderId?: string;
+export interface TutGatewayConfig {
+  gatewayBaseUrl: string;
+  merchantId: string;
+  merchantName: string;
 }
 
 export interface PaymentSubmissionDoc {

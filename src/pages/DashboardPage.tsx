@@ -55,7 +55,6 @@ export function DashboardPage({
     <AppShell
       currentRoute="dashboard"
       pageTitle="AI Playground"
-      breadcrumb="Universe"
       onNavigate={onNavigate}
       fullBleed
       hideTopBar

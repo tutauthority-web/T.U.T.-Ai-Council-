@@ -205,7 +205,6 @@ export function ModelLibraryPage({
       <AppShell
         currentRoute="models"
         pageTitle="AI Model Land"
-        breadcrumb="Universe"
         onNavigate={onNavigate}
         fullBleed
         hideTopBar
@@ -237,7 +236,6 @@ export function ModelLibraryPage({
       <AppShell
         currentRoute="models"
         pageTitle="AI Providers"
-        breadcrumb="AI Model Land"
         onNavigate={onNavigate}
         primaryAction={
           <div className="flex items-center gap-2">
@@ -339,7 +337,6 @@ export function ModelLibraryPage({
     <AppShell
       currentRoute="models"
       pageTitle="Model Directory"
-      breadcrumb="AI Model Land"
       onNavigate={onNavigate}
       primaryAction={
         <div className="flex items-center gap-2">

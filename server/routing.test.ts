@@ -28,10 +28,9 @@ import {
 } from './modelHealth.ts';
 import { runCouncilEngine } from './orchestrator.ts';
 import {
-  getMlaConfig,
-  getPublicWalletClientConfig,
-  getSafeMlaConfigForAdmin,
-  saveMlaConfig,
+  getTutGatewayConfig,
+  saveTutGatewayConfig,
+  verifyTutGatewayPayment,
 } from './payments.ts';
 import { runCouncilPreflight } from './preflight.ts';
 import { ANTHROPIC_PROBE_TIMEOUT_MS, verifyAnthropicConnection } from './providers/anthropic.ts';
@@ -2570,18 +2569,12 @@ async function runTests() {
     );
   }
 
-  // Scenario 24: T.U.T. Wallet env secrets, HTTP->HTTPS .run.app upgrade, SSRF guard & Admin redaction
+  // Scenario 24: T.U.T. Vercel Payment Gateway config, SSRF guard & callback token verification guards
   {
     const envKeys = [
-      'TUT_FIREBASE_PROJECT_ID',
-      'TUT_FIREBASE_DATABASE_ID',
-      'TUT_FIREBASE_API_KEY',
-      'TUT_FIREBASE_AUTH_DOMAIN',
-      'TUT_FIREBASE_APP_ID',
-      'TUT_FIREBASE_STORAGE_BUCKET',
-      'TUT_FIREBASE_MESSAGING_SENDER_ID',
-      'TUT_PAYMENT_CHECKOUT_URL',
-      'TUT_VERIFY_RECEIPT_URL',
+      'TUT_GATEWAY_BASE_URL',
+      'TUT_MERCHANT_ID',
+      'TUT_MERCHANT_NAME',
     ] as const;
     const savedEnv: Record<string, string | undefined> = {};
     for (const k of envKeys) {
@@ -2589,67 +2582,43 @@ async function runTests() {
     }
 
     try {
-      process.env.TUT_FIREBASE_PROJECT_ID = 'demo-wallet-project';
-      process.env.TUT_FIREBASE_DATABASE_ID = 'demo-wallet-db';
-      process.env.TUT_FIREBASE_API_KEY = 'AIzaSyFakeUnitTestPlaceholderKey000001';
-      process.env.TUT_FIREBASE_AUTH_DOMAIN = 'demo-wallet-project.firebaseapp.com';
-      process.env.TUT_FIREBASE_APP_ID = '1:100000000000:web:abc123def456';
-      process.env.TUT_FIREBASE_STORAGE_BUCKET = 'demo-wallet-project.firebasestorage.app';
-      process.env.TUT_FIREBASE_MESSAGING_SENDER_ID = '100000000000';
-      process.env.TUT_PAYMENT_CHECKOUT_URL = 'http://demo-gateway.asia-southeast1.run.app/pay';
-      process.env.TUT_VERIFY_RECEIPT_URL =
-        'http://demo-gateway.asia-southeast1.run.app/api/gateway/verify-receipt';
+      process.env.TUT_GATEWAY_BASE_URL =
+        'https://t-u-t-money-lending-authority-apkma.vercel.app/';
+      process.env.TUT_MERCHANT_ID = 'council-prime-test';
+      process.env.TUT_MERCHANT_NAME = 'T.U.T AI Council Test';
 
-      const full = getMlaConfig();
-      assert.equal(full.projectId, 'demo-wallet-project');
-      assert.equal(full.firestoreDatabaseId, 'demo-wallet-db');
+      const cfg = getTutGatewayConfig();
       assert.equal(
-        full.checkoutUrl,
-        'https://demo-gateway.asia-southeast1.run.app/pay',
-        'http://*.run.app checkout URL must normalize to https:// and preserve /pay path',
+        cfg.gatewayBaseUrl,
+        'https://t-u-t-money-lending-authority-apkma.vercel.app',
+        'Gateway base URL must normalize to origin without trailing slash',
       );
-      assert.equal(
-        full.verifyReceiptUrl,
-        'https://demo-gateway.asia-southeast1.run.app/api/gateway/verify-receipt',
-        'http://*.run.app verify URL must normalize to https://',
-      );
-
-      const redacted = getSafeMlaConfigForAdmin();
-      assert.equal(redacted.apiKey, '', 'Admin config response must never echo raw apiKey');
-      assert.equal(redacted.hasApiKey, true);
-      assert.ok(
-        redacted.apiKeyPreview &&
-          redacted.apiKeyPreview.includes('••••') &&
-          !redacted.apiKeyPreview.includes(process.env.TUT_FIREBASE_API_KEY!),
-        'apiKeyPreview must mask the middle of the key',
-      );
-
-      const pub = getPublicWalletClientConfig();
-      assert.equal(pub.mlaConfigured, true);
-      assert.equal(pub.checkoutUrl, 'https://demo-gateway.asia-southeast1.run.app/pay');
-      assert.equal(
-        pub.verifyReceiptUrl,
-        'https://demo-gateway.asia-southeast1.run.app/api/gateway/verify-receipt',
-      );
-      assert.ok(pub.walletFirebaseConfig);
-      assert.equal(pub.walletFirebaseConfig.projectId, 'demo-wallet-project');
-      assert.equal(pub.walletFirebaseConfig.appId, '1:100000000000:web:abc123def456');
-
-      const builtCheckout = new URL(pub.checkoutUrl);
-      builtCheckout.searchParams.set('tut_pay', '1');
-      builtCheckout.searchParams.set('amount', '49');
-      builtCheckout.searchParams.set('merchant', 'T.U.T AI Council');
-      builtCheckout.searchParams.set('orderId', 'ORD-TEST-01');
-      builtCheckout.searchParams.set('returnUrl', 'https://council.example.com/');
-      assert.equal(builtCheckout.protocol, 'https:');
-      assert.equal(builtCheckout.pathname, '/pay');
-      assert.equal(builtCheckout.searchParams.get('tut_pay'), '1');
-      assert.equal(builtCheckout.searchParams.get('amount'), '49');
-      assert.equal(builtCheckout.searchParams.get('orderId'), 'ORD-TEST-01');
+      assert.equal(cfg.merchantId, 'council-prime-test');
+      assert.equal(cfg.merchantName, 'T.U.T AI Council Test');
 
       assert.throws(
-        () => saveMlaConfig({ checkoutUrl: 'http://127.0.0.1:8080/pay' }),
+        () => saveTutGatewayConfig({ gatewayBaseUrl: 'http://127.0.0.1:8080/pay' }),
         /Private or loopback hostnames are not permitted/,
+      );
+
+      await assert.rejects(
+        () =>
+          verifyTutGatewayPayment({
+            uid: 'u_test',
+            email: 'u@example.com',
+            tutStatus: 'cancelled',
+          }),
+        /No charge was applied/,
+      );
+
+      await assert.rejects(
+        () =>
+          verifyTutGatewayPayment({
+            uid: 'u_test',
+            email: 'u@example.com',
+            tutStatus: 'paid',
+          }),
+        /Missing tut_token/,
       );
     } finally {
       for (const k of envKeys) {

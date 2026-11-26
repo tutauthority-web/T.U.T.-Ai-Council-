@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import {
   AlertTriangle,
+  ArrowLeft,
   ChevronDown,
   Download,
   FileJson,
@@ -16,7 +17,6 @@ import {
   PROVIDER_REGISTRY,
 } from '../../shared/providers';
 import type { CouncilRoomDoc, ProviderId } from '../../shared/types';
-import { AppShellMobileMenuButton } from '../AppShell';
 import {
   getDuplicateProviderCompositeSet,
   getModelVisualIdentity,
@@ -58,6 +58,7 @@ export function ChatHeader({
   onStop,
   onExportMarkdown,
   onExportJSON,
+  onBack,
   hideModelDetails = false,
 }: {
   council: CouncilRoomDoc;
@@ -73,6 +74,7 @@ export function ChatHeader({
   onStop: () => void;
   onExportMarkdown: () => void;
   onExportJSON: () => void;
+  onBack?: () => void;
   hideModelDetails?: boolean;
 }) {
   const [modelsExpanded, setModelsExpanded] = useState(false);
@@ -88,9 +90,18 @@ export function ChatHeader({
     <header className="w-full shrink-0 z-20 border-b border-white/[0.08] bg-[#0B1123]/85 backdrop-blur-xl">
       <div className="w-full px-3 sm:px-5 py-2.5">
         <div className="flex items-center justify-between gap-2 sm:gap-3">
-          {/* Left: Mobile Nav + Overlapping Avatars + Room Title */}
-          <div className="flex items-center gap-2 min-w-0 flex-1">
-            <AppShellMobileMenuButton className="-ml-1" />
+          {/* Left: Native Back + Overlapping Avatars + Room Title */}
+          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
+            {onBack && (
+              <button
+                type="button"
+                onClick={onBack}
+                aria-label="Go back"
+                className="-ml-1 lg:hidden inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-xl text-[#CBD5E1] hover:text-white hover:bg-white/10 transition-colors cursor-pointer shrink-0"
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </button>
+            )}
 
             <button
               type="button"

@@ -17,7 +17,8 @@ import {
   Sun,
   X,
 } from 'lucide-react';
-import { AppShellMobileMenuButton, type AppRoute } from '../AppShell';
+import { type AppRoute } from '../AppShell';
+import { ProviderLogoMark } from '../ProviderBadge';
 import { useAuth } from '../../contexts/AuthContext';
 import { useWorldTheme } from '../../contexts/WorldThemeContext';
 import { formatContextWindow } from '../../lib/modelSelection';
@@ -204,10 +205,10 @@ export function ModelLandExperience({
   return (
     <div className="relative flex-1 w-full h-full min-h-0 overflow-hidden select-none">
       <WorldCanvas
-        cameraPosition={[0, 42, 46]}
-        fov={45}
-        fogDensityDay={0.0034}
-        fogDensityNight={0.0044}
+        cameraPosition={[0, 28, 42]}
+        fov={46}
+        fogDensityDay={0.0022}
+        fogDensityNight={0.0028}
         fallbackContent={fallback2D}
       >
         <ModelLandWorld
@@ -228,15 +229,14 @@ export function ModelLandExperience({
         <div className="flex items-center justify-between gap-2">
           {!hudHidden ? (
             <div
-              className={`pointer-events-auto flex items-center gap-2.5 px-3 py-2 rounded-2xl border backdrop-blur-md min-w-0 max-w-[66vw] sm:max-w-md ${hudSurfaceClass}`}
+              className={`pointer-events-auto flex items-center gap-2.5 px-3 py-2 rounded-2xl border backdrop-blur-md min-w-0 max-w-[calc(100vw-9.5rem)] sm:max-w-md ${hudSurfaceClass}`}
             >
-              <AppShellMobileMenuButton />
               {level !== 'world' && (
                 <button
                   type="button"
                   onClick={handleStepBack}
                   aria-label="Step back up one navigation level"
-                  className="p-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/35 text-blue-400 transition-colors cursor-pointer shrink-0"
+                  className="min-h-[38px] min-w-[38px] flex items-center justify-center rounded-xl bg-blue-600/20 hover:bg-blue-600/35 text-blue-400 transition-colors cursor-pointer shrink-0"
                 >
                   <ArrowLeft className="w-4 h-4" />
                 </button>
@@ -271,9 +271,7 @@ export function ModelLandExperience({
               </div>
             </div>
           ) : (
-            <div className="pointer-events-auto">
-              <AppShellMobileMenuButton className={hudSurfaceClass} />
-            </div>
+            <div />
           )}
 
           {/* Right App Actions */}
@@ -285,7 +283,8 @@ export function ModelLandExperience({
                   disabled={connectionsLoading}
                   onClick={() => void refreshProviderState(true)}
                   title="Sync Live Providers"
-                  className={`inline-flex items-center gap-1.5 min-h-[36px] px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-medium transition-colors whitespace-nowrap cursor-pointer disabled:opacity-50 ${hudSurfaceClass}`}
+                  aria-label="Sync Live Providers"
+                  className={`inline-flex items-center justify-center gap-1.5 min-h-[40px] min-w-[40px] sm:px-3 py-1.5 rounded-xl border text-xs font-medium transition-colors whitespace-nowrap cursor-pointer disabled:opacity-50 ${hudSurfaceClass}`}
                 >
                   <RefreshCw
                     className={`w-3.5 h-3.5 text-sky-400 ${
@@ -299,7 +298,7 @@ export function ModelLandExperience({
                   type="button"
                   onClick={toggleTimeOfDay}
                   aria-label={isDay ? 'Switch to Night atmosphere' : 'Switch to Day atmosphere'}
-                  className={`inline-flex items-center justify-center w-9 h-9 rounded-xl border text-xs font-medium transition-colors cursor-pointer ${hudSurfaceClass}`}
+                  className={`inline-flex items-center justify-center w-10 h-10 rounded-xl border text-xs font-medium transition-colors cursor-pointer ${hudSurfaceClass}`}
                 >
                   {isDay ? (
                     <Sun className="w-4 h-4 text-amber-500" />
@@ -312,7 +311,8 @@ export function ModelLandExperience({
                   type="button"
                   onClick={onSwitchToListView}
                   title="Open 2D List Directory"
-                  className={`inline-flex items-center gap-1.5 min-h-[36px] px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-medium transition-colors whitespace-nowrap cursor-pointer ${hudSurfaceClass}`}
+                  aria-label="Open 2D List Directory"
+                  className={`inline-flex items-center justify-center gap-1.5 min-h-[40px] min-w-[40px] sm:px-3 py-1.5 rounded-xl border text-xs font-medium transition-colors whitespace-nowrap cursor-pointer ${hudSurfaceClass}`}
                 >
                   <ListFilter className="w-3.5 h-3.5 text-blue-400" />
                   <span className="hidden sm:inline">List View</span>
@@ -324,7 +324,7 @@ export function ModelLandExperience({
               type="button"
               onClick={() => setHudHidden((v) => !v)}
               aria-label={hudHidden ? 'Show Model Land HUD' : 'Hide HUD'}
-              className={`inline-flex items-center justify-center w-9 h-9 rounded-xl border transition-colors cursor-pointer ${hudSurfaceClass}`}
+              className={`inline-flex items-center justify-center w-10 h-10 rounded-xl border transition-colors cursor-pointer ${hudSurfaceClass}`}
             >
               {hudHidden ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
             </button>
@@ -378,7 +378,7 @@ export function ModelLandExperience({
       {/* Building Inspector Card (Visible in Building View) */}
       {!hudHidden && level === 'building' && activeBuilding && (
         <aside
-          className={`pointer-events-auto animate-panel-enter absolute bottom-16 left-3 right-3 sm:left-auto sm:right-5 sm:bottom-20 z-30 sm:w-full sm:max-w-sm rounded-2xl border backdrop-blur-md p-4 space-y-3 ${hudSurfaceClass}`}
+          className={`pointer-events-auto animate-panel-enter absolute bottom-3 left-3 right-3 sm:left-auto sm:right-5 sm:bottom-20 z-30 sm:w-full sm:max-w-sm rounded-2xl border backdrop-blur-md p-4 space-y-3 ${hudSurfaceClass}`}
         >
           <div className="flex items-start justify-between gap-2.5">
             <div className="min-w-0">
@@ -553,9 +553,13 @@ export function ModelLandExperience({
         </aside>
       )}
 
-      {/* Bottom City Quick-Jump Dock & Council Launch Tray */}
+      {/* Bottom City Quick-Jump Dock & Council Launch Tray (hidden on mobile when Building Inspector sheet is open) */}
       {!hudHidden && (
-        <div className="pointer-events-none absolute bottom-0 inset-x-0 z-20 p-2.5 sm:p-3.5 flex flex-col items-center gap-2">
+        <div
+          className={`pointer-events-none absolute bottom-0 inset-x-0 z-20 p-2.5 sm:p-3.5 flex-col items-center gap-2 ${
+            level === 'building' && activeBuilding ? 'hidden sm:flex' : 'flex'
+          }`}
+        >
           {councilQueue.length > 0 && (
             <div
               className={`pointer-events-auto flex flex-wrap items-center justify-between gap-3 px-3.5 py-2 rounded-2xl border max-w-2xl w-full ${hudSurfaceClass}`}
@@ -574,7 +578,7 @@ export function ModelLandExperience({
                 <button
                   type="button"
                   onClick={() => onStartCouncilWithSelection(councilQueue, councilQueue[0])}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold cursor-pointer"
+                  className="inline-flex items-center gap-1.5 min-h-[36px] px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold cursor-pointer"
                 >
                   <MessageSquarePlus className="w-3.5 h-3.5" />
                   Launch ({councilQueue.length})
@@ -583,14 +587,14 @@ export function ModelLandExperience({
             </div>
           )}
 
-          {/* Scrollable City Selector Dock */}
+          {/* Scrollable City Selector Dock with Provider Logo Marks */}
           <div
             className={`pointer-events-auto flex items-center gap-1 p-1.5 rounded-2xl border overflow-x-auto max-w-full ${hudSurfaceClass}`}
           >
             <button
               type="button"
               onClick={() => handleLevelSwitch('world')}
-              className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
+              className={`min-h-[38px] px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
                 level === 'world'
                   ? 'bg-blue-600 text-white'
                   : isDay
@@ -603,7 +607,7 @@ export function ModelLandExperience({
             {districts.map((d) => {
               const active = level !== 'world' && selectedCityId === d.config.providerId;
               const isDisconnected = d.status === 'disconnected';
-              const dotColor =
+              const iconColor =
                 d.status === 'operational'
                   ? d.config.accentHex
                   : d.status === 'warning'
@@ -616,7 +620,7 @@ export function ModelLandExperience({
                   key={d.config.providerId}
                   type="button"
                   onClick={() => handleSelectCity(d.config.providerId)}
-                  className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
+                  className={`inline-flex items-center gap-1.5 min-h-[38px] px-2.5 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-colors cursor-pointer shrink-0 ${
                     active
                       ? 'bg-slate-700 text-white'
                       : isDisconnected
@@ -628,10 +632,9 @@ export function ModelLandExperience({
                           : 'hover:bg-slate-800 text-slate-100'
                   }`}
                 >
-                  <span
-                    className="w-2 h-2 rounded-full shrink-0"
-                    style={{ backgroundColor: dotColor }}
-                  />
+                  <span className="shrink-0" style={{ color: iconColor }}>
+                    <ProviderLogoMark provider={d.config.providerId} className="w-3.5 h-3.5" />
+                  </span>
                   {PROVIDER_REGISTRY[d.config.providerId].shortName}
                 </button>
               );

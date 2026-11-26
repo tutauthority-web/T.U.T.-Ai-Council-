@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
-  ArrowLeft,
   Building2,
   CheckCircle2,
   ChevronDown,
@@ -30,10 +29,9 @@ import {
   grantAdminSubscriberApi,
   reviewAdminPayment,
   revokeAdminSubscriberApi,
-  saveAdminMlaConfig,
+  saveAdminGatewayConfig,
   saveAdminSharedConnection,
   testAdminSharedConnection,
-  type MlaConfigInfo,
 } from '../lib/apiClient';
 import { formatStatusLabel, getStatusTextClass } from '../lib/statusLabels';
 import {
@@ -47,12 +45,15 @@ import {
   getPremiumPlan,
   PREMIUM_PLANS,
   PREMIUM_PROVIDER_PRIORITY,
-  TUT_HOSTED_CHECKOUT_URL,
+  TUT_GATEWAY_BASE_URL,
+  TUT_MERCHANT_ID,
+  TUT_MERCHANT_NAME,
   type GatewayCheckoutOrder,
   type PaymentSubmissionDoc,
   type ProviderConnectionSummary,
   type ProviderId,
   type SubscriptionCycle,
+  type TutGatewayConfig,
   type UserSubscriptionDoc,
 } from '../shared/types';
 
@@ -80,8 +81,10 @@ function getDaysRemaining(expiresAt?: string): number {
 
 export function AdminPortalPage({
   onNavigate,
+  onBack,
 }: {
   onNavigate: (route: AppRoute) => void;
+  onBack?: () => void;
 }) {
   const { isAdmin, refreshSubscription, refreshProviderState } = useAuth();
 
@@ -94,7 +97,7 @@ export function AdminPortalPage({
   const [subscriptions, setSubscriptions] = useState<UserSubscriptionDoc[]>([]);
   const [gatewayOrders, setGatewayOrders] = useState<GatewayCheckoutOrder[]>([]);
   const [adminConnections, setAdminConnections] = useState<ProviderConnectionSummary[]>([]);
-  const [mlaConfig, setMlaConfig] = useState<MlaConfigInfo | null>(null);
+  const [gatewayConfig, setGatewayConfig] = useState<TutGatewayConfig | null>(null);
 
   // Payment Review Filter & Notes
   const [paymentFilter, setPaymentFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
@@ -122,23 +125,13 @@ export function AdminPortalPage({
   const [busyProvider, setBusyProvider] = useState<string | null>(null);
   const [apiFeedback, setApiFeedback] = useState<Record<string, { type: 'ok' | 'err'; text: string }>>({});
 
-  // T.U.T. PLA Gateway & MLA Config Form
-  const [mlaForm, setMlaForm] = useState({
-    projectId: '',
-    firestoreDatabaseId: '(default)',
-    membersCollection: 'members',
-    emailField: 'email',
-    balanceField: 'balance',
-    checkoutUrl: TUT_HOSTED_CHECKOUT_URL,
-    verifyReceiptUrl: '',
-    gatewayUrl: TUT_HOSTED_CHECKOUT_URL,
-    authDomain: '',
-    appId: '',
-    storageBucket: '',
-    messagingSenderId: '',
-    apiKey: '',
+  // T.U.T. Money Lending Authority Gateway Settings
+  const [gatewayForm, setGatewayForm] = useState<TutGatewayConfig>({
+    gatewayBaseUrl: TUT_GATEWAY_BASE_URL,
+    merchantId: TUT_MERCHANT_ID,
+    merchantName: TUT_MERCHANT_NAME,
   });
-  const [mlaSaving, setMlaSaving] = useState(false);
+  const [gatewaySaving, setGatewaySaving] = useState(false);
 
   const detectedQuickProvider = useMemo(() => detectProviderFromApiKey(quickKey), [quickKey]);
   const effectiveQuickProvider = detectedQuickProvider || quickProviderOverride;
@@ -152,21 +145,11 @@ export function AdminPortalPage({
       setSubscriptions(data.subscriptions);
       setGatewayOrders(data.gatewayOrders);
       setAdminConnections(data.connections);
-      setMlaConfig(data.mlaConfig);
-      setMlaForm({
-        projectId: data.mlaConfig.projectId || '',
-        firestoreDatabaseId: data.mlaConfig.firestoreDatabaseId || '(default)',
-        membersCollection: data.mlaConfig.membersCollection || 'members',
-        emailField: data.mlaConfig.emailField || 'email',
-        balanceField: data.mlaConfig.balanceField || 'balance',
-        checkoutUrl: data.mlaConfig.checkoutUrl || data.mlaConfig.gatewayUrl || TUT_HOSTED_CHECKOUT_URL,
-        verifyReceiptUrl: data.mlaConfig.verifyReceiptUrl || '',
-        gatewayUrl: data.mlaConfig.gatewayUrl || data.mlaConfig.checkoutUrl || TUT_HOSTED_CHECKOUT_URL,
-        authDomain: data.mlaConfig.authDomain || '',
-        appId: data.mlaConfig.appId || '',
-        storageBucket: data.mlaConfig.storageBucket || '',
-        messagingSenderId: data.mlaConfig.messagingSenderId || '',
-        apiKey: '',
+      setGatewayConfig(data.gatewayConfig);
+      setGatewayForm({
+        gatewayBaseUrl: data.gatewayConfig.gatewayBaseUrl || TUT_GATEWAY_BASE_URL,
+        merchantId: data.gatewayConfig.merchantId || TUT_MERCHANT_ID,
+        merchantName: data.gatewayConfig.merchantName || TUT_MERCHANT_NAME,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -242,8 +225,9 @@ export function AdminPortalPage({
       <AppShell
         currentRoute="admin"
         pageTitle="Admin Portal"
-        breadcrumb="Restricted"
         onNavigate={onNavigate}
+        showBackButton
+        onBack={onBack || (() => onNavigate('portal'))}
       >
         <div className="max-w-lg mx-auto my-12 bg-[#111827] border border-slate-800 rounded-xl p-6 space-y-4 text-center">
           <AlertCircle className="w-8 h-8 text-amber-400 mx-auto" />
@@ -453,38 +437,22 @@ export function AdminPortalPage({
 
   const handleSaveGatewayConfig = async (e: React.FormEvent) => {
     e.preventDefault();
-    setMlaSaving(true);
+    setGatewaySaving(true);
     setError(null);
     setNotice(null);
     try {
-      const saved = await saveAdminMlaConfig({
-        projectId: mlaForm.projectId,
-        firestoreDatabaseId: mlaForm.firestoreDatabaseId,
-        membersCollection: mlaForm.membersCollection,
-        emailField: mlaForm.emailField,
-        balanceField: mlaForm.balanceField,
-        checkoutUrl: mlaForm.checkoutUrl,
-        verifyReceiptUrl: mlaForm.verifyReceiptUrl,
-        gatewayUrl: mlaForm.checkoutUrl,
-        authDomain: mlaForm.authDomain,
-        appId: mlaForm.appId,
-        storageBucket: mlaForm.storageBucket,
-        messagingSenderId: mlaForm.messagingSenderId,
-        ...(mlaForm.apiKey.trim() ? { apiKey: mlaForm.apiKey.trim() } : {}),
+      const saved = await saveAdminGatewayConfig({
+        gatewayBaseUrl: gatewayForm.gatewayBaseUrl,
+        merchantId: gatewayForm.merchantId,
+        merchantName: gatewayForm.merchantName,
       });
-      setMlaConfig(saved);
-      setMlaForm((prev) => ({
-        ...prev,
-        checkoutUrl: saved.checkoutUrl || prev.checkoutUrl,
-        verifyReceiptUrl: saved.verifyReceiptUrl || prev.verifyReceiptUrl,
-        gatewayUrl: saved.gatewayUrl || saved.checkoutUrl || prev.gatewayUrl,
-        apiKey: '',
-      }));
-      setNotice('T.U.T. Wallet & Hosted Checkout configuration saved.');
+      setGatewayConfig(saved);
+      setGatewayForm(saved);
+      setNotice('T.U.T. Money Lending Authority Gateway configuration saved.');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setMlaSaving(false);
+      setGatewaySaving(false);
     }
   };
 
@@ -492,28 +460,19 @@ export function AdminPortalPage({
     <AppShell
       currentRoute="admin"
       pageTitle="Admin Portal"
-      breadcrumb="Control Plane"
       onNavigate={onNavigate}
+      showBackButton
+      onBack={onBack || (() => onNavigate('portal'))}
       primaryAction={
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            disabled={loading}
-            onClick={() => void loadOverview()}
-            className="inline-flex items-center gap-1.5 min-h-[40px] px-3 py-2 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition-colors whitespace-nowrap cursor-pointer disabled:opacity-60"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            <span className="hidden sm:inline">Refresh</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => onNavigate('portal')}
-            className="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 text-xs font-medium bg-[#111827] hover:bg-slate-800 border border-slate-700 text-slate-200 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" />
-            User Portal
-          </button>
-        </div>
+        <button
+          type="button"
+          disabled={loading}
+          onClick={() => void loadOverview()}
+          className="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition-colors whitespace-nowrap cursor-pointer disabled:opacity-60"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+          <span className="hidden sm:inline">Refresh</span>
+        </button>
       }
     >
       <div className="space-y-8 pb-8">
@@ -588,7 +547,7 @@ export function AdminPortalPage({
               },
               { id: 'subscribers', label: `Subscribers (${subscriptions.length})` },
               { id: 'apis', label: `Shared API Pool (${kpis.connectedApisCount})` },
-              { id: 'gateway', label: 'T.U.T. PLA & MLA Link' },
+              { id: 'gateway', label: 'T.U.T. Gateway' },
             ] as const
           ).map((tab) => (
             <button
@@ -616,7 +575,7 @@ export function AdminPortalPage({
                     Payment Verification Queue
                   </h3>
                   <p className="text-xs text-slate-400">
-                    Review bKash, Nagad, and queued T.U.T. PLA Hosted Checkout receipts. Approving activates Premium validity immediately.
+                    Review bKash and Nagad manual Send Money submissions. Approving activates Premium validity immediately.
                   </p>
                 </div>
 
@@ -765,7 +724,7 @@ export function AdminPortalPage({
                       <th className="text-left font-medium px-5 py-3">Plan</th>
                       <th className="text-right font-medium px-5 py-3">Amount</th>
                       <th className="text-left font-medium px-5 py-3">Status</th>
-                      <th className="text-left font-medium px-5 py-3">Receipt Ref</th>
+                      <th className="text-left font-medium px-5 py-3">Memo / Ref</th>
                       <th className="text-right font-medium px-5 py-3">Created</th>
                     </tr>
                   </thead>
@@ -796,7 +755,7 @@ export function AdminPortalPage({
                           </span>
                         </td>
                         <td className="px-5 py-3 font-mono text-slate-400 whitespace-nowrap">
-                          {o.receiptRef || '—'}
+                          {o.memoId || o.receiptRef || '—'}
                         </td>
                         <td className="px-5 py-3 text-right text-slate-400 whitespace-nowrap">
                           {formatDate(o.createdAt)}
@@ -806,7 +765,7 @@ export function AdminPortalPage({
                     {gatewayOrders.length === 0 && (
                       <tr>
                         <td colSpan={7} className="px-5 py-8 text-center text-slate-400">
-                          No T.U.T. Hosted Checkout orders initiated yet.
+                          No T.U.T. Card Checkout orders initiated yet.
                         </td>
                       </tr>
                     )}
@@ -1278,222 +1237,96 @@ export function AdminPortalPage({
           </div>
         )}
 
-        {/* TAB 4: T.U.T. PLA GATEWAY & MLA FIRESTORE CONFIG */}
+        {/* TAB 4: T.U.T. MONEY LENDING AUTHORITY GATEWAY CONFIG */}
         {activeTab === 'gateway' && (
           <section className="bg-[#111827] border border-slate-800 rounded-xl p-6 space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-4">
               <div className="space-y-1">
                 <h3 className="font-display text-base font-semibold text-slate-100 flex items-center gap-2">
                   <Building2 className="w-4 h-4 text-sky-400" />
-                  T.U.T. Wallet Firebase &amp; Hosted Checkout Settings
+                  T.U.T. Money Lending Authority Card Gateway
                 </h3>
                 <p className="text-xs text-slate-400">
-                  Reads <span className="font-mono text-slate-300">TUT_FIREBASE_*</span>,{' '}
-                  <span className="font-mono text-slate-300">TUT_PAYMENT_CHECKOUT_URL</span>, and{' '}
-                  <span className="font-mono text-slate-300">TUT_VERIFY_RECEIPT_URL</span> from environment secrets or Admin overrides below.
+                  Server creates checkout sessions at{' '}
+                  <span className="font-mono text-slate-300">/api/gateway/create-session</span>{' '}
+                  and verifies returned <span className="font-mono text-slate-300">tut_token</span>{' '}
+                  proofs at <span className="font-mono text-slate-300">/api/gateway/verify-payment</span>.
                 </p>
               </div>
-              <span
-                className={`text-xs font-medium ${
-                  mlaConfig?.configured ? 'text-emerald-400' : 'text-amber-300'
-                }`}
-              >
-                {mlaConfig?.configured
-                  ? mlaConfig.hasApiKey
-                    ? 'Wallet Auth & Firestore Linked'
-                    : 'Direct Firestore Linked'
-                  : 'Hosted Checkout Active'}
+              <span className="text-xs font-medium text-emerald-400 whitespace-nowrap">
+                {gatewayConfig?.gatewayBaseUrl ? 'Gateway Active' : 'Default Active'}
               </span>
             </div>
 
             <form
               onSubmit={handleSaveGatewayConfig}
-              className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs"
+              className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs"
             >
-              <div className="space-y-1 sm:col-span-2 lg:col-span-3">
-                <label htmlFor="admin-gw-url" className="text-slate-300 font-medium">
-                  T.U.T. Payment Checkout URL (TUT_PAYMENT_CHECKOUT_URL)
+              <div className="space-y-1 md:col-span-2">
+                <label htmlFor="admin-gw-base" className="text-slate-300 font-medium">
+                  Gateway Base Origin (TUT_GATEWAY_BASE_URL)
                 </label>
                 <input
-                  id="admin-gw-url"
+                  id="admin-gw-base"
                   type="url"
                   required
-                  placeholder={TUT_HOSTED_CHECKOUT_URL}
-                  value={mlaForm.checkoutUrl}
+                  placeholder={TUT_GATEWAY_BASE_URL}
+                  value={gatewayForm.gatewayBaseUrl}
                   onChange={(e) =>
-                    setMlaForm((f) => ({
-                      ...f,
-                      checkoutUrl: e.target.value,
-                      gatewayUrl: e.target.value,
-                    }))
+                    setGatewayForm((f) => ({ ...f, gatewayBaseUrl: e.target.value }))
                   }
                   className="w-full min-h-[42px] px-3 py-2 bg-[#090E1A] border border-slate-800 rounded-lg text-slate-100 font-mono"
                 />
               </div>
-              <div className="space-y-1 sm:col-span-2 lg:col-span-3">
-                <label htmlFor="admin-verify-url" className="text-slate-300 font-medium">
-                  T.U.T. Verify Receipt Endpoint (TUT_VERIFY_RECEIPT_URL)
+              <div className="space-y-1">
+                <label htmlFor="admin-merchant-id" className="text-slate-300 font-medium">
+                  Merchant ID (TUT_MERCHANT_ID)
                 </label>
                 <input
-                  id="admin-verify-url"
-                  type="url"
-                  placeholder="https://.../api/gateway/verify-receipt"
-                  value={mlaForm.verifyReceiptUrl}
+                  id="admin-merchant-id"
+                  type="text"
+                  required
+                  maxLength={80}
+                  placeholder={TUT_MERCHANT_ID}
+                  value={gatewayForm.merchantId}
                   onChange={(e) =>
-                    setMlaForm((f) => ({ ...f, verifyReceiptUrl: e.target.value }))
+                    setGatewayForm((f) => ({ ...f, merchantId: e.target.value }))
                   }
                   className="w-full min-h-[42px] px-3 py-2 bg-[#090E1A] border border-slate-800 rounded-lg text-slate-100 font-mono"
                 />
               </div>
               <div className="space-y-1">
-                <label htmlFor="admin-mla-project" className="text-slate-300 font-medium">
-                  Wallet Firebase Project ID
+                <label htmlFor="admin-merchant-name" className="text-slate-300 font-medium">
+                  Merchant Display Name (TUT_MERCHANT_NAME)
                 </label>
                 <input
-                  id="admin-mla-project"
+                  id="admin-merchant-name"
                   type="text"
-                  placeholder="gen-lang-client-..."
-                  value={mlaForm.projectId}
-                  onChange={(e) => setMlaForm((f) => ({ ...f, projectId: e.target.value }))}
-                  className="w-full min-h-[42px] px-3 py-2 bg-[#090E1A] border border-slate-800 rounded-lg text-slate-100 font-mono"
-                />
-              </div>
-              <div className="space-y-1">
-                <label htmlFor="admin-mla-db" className="text-slate-300 font-medium">
-                  Firestore Database ID
-                </label>
-                <input
-                  id="admin-mla-db"
-                  type="text"
-                  value={mlaForm.firestoreDatabaseId}
+                  required
+                  maxLength={80}
+                  placeholder={TUT_MERCHANT_NAME}
+                  value={gatewayForm.merchantName}
                   onChange={(e) =>
-                    setMlaForm((f) => ({ ...f, firestoreDatabaseId: e.target.value }))
+                    setGatewayForm((f) => ({ ...f, merchantName: e.target.value }))
                   }
-                  className="w-full min-h-[42px] px-3 py-2 bg-[#090E1A] border border-slate-800 rounded-lg text-slate-100 font-mono"
+                  className="w-full min-h-[42px] px-3 py-2 bg-[#090E1A] border border-slate-800 rounded-lg text-slate-100"
                 />
               </div>
-              <div className="space-y-1">
-                <label htmlFor="admin-mla-auth-domain" className="text-slate-300 font-medium">
-                  Wallet Auth Domain
-                </label>
-                <input
-                  id="admin-mla-auth-domain"
-                  type="text"
-                  placeholder="project.firebaseapp.com"
-                  value={mlaForm.authDomain}
-                  onChange={(e) => setMlaForm((f) => ({ ...f, authDomain: e.target.value }))}
-                  className="w-full min-h-[42px] px-3 py-2 bg-[#090E1A] border border-slate-800 rounded-lg text-slate-100 font-mono"
-                />
+              <div className="md:col-span-2 rounded-lg border border-slate-800 bg-[#090E1A] p-3.5 space-y-1 text-[11px] text-slate-400 font-mono">
+                <p>
+                  Create Session: {gatewayForm.gatewayBaseUrl.replace(/\/+$/, '')}/api/gateway/create-session
+                </p>
+                <p>
+                  Verify Payment: {gatewayForm.gatewayBaseUrl.replace(/\/+$/, '')}/api/gateway/verify-payment
+                </p>
               </div>
-              <div className="space-y-1">
-                <label htmlFor="admin-mla-app-id" className="text-slate-300 font-medium">
-                  Wallet Firebase App ID
-                </label>
-                <input
-                  id="admin-mla-app-id"
-                  type="text"
-                  placeholder="1:...:web:..."
-                  value={mlaForm.appId}
-                  onChange={(e) => setMlaForm((f) => ({ ...f, appId: e.target.value }))}
-                  className="w-full min-h-[42px] px-3 py-2 bg-[#090E1A] border border-slate-800 rounded-lg text-slate-100 font-mono"
-                />
-              </div>
-              <div className="space-y-1">
-                <label htmlFor="admin-mla-bucket" className="text-slate-300 font-medium">
-                  Storage Bucket
-                </label>
-                <input
-                  id="admin-mla-bucket"
-                  type="text"
-                  placeholder="project.firebasestorage.app"
-                  value={mlaForm.storageBucket}
-                  onChange={(e) => setMlaForm((f) => ({ ...f, storageBucket: e.target.value }))}
-                  className="w-full min-h-[42px] px-3 py-2 bg-[#090E1A] border border-slate-800 rounded-lg text-slate-100 font-mono"
-                />
-              </div>
-              <div className="space-y-1">
-                <label htmlFor="admin-mla-sender" className="text-slate-300 font-medium">
-                  Messaging Sender ID
-                </label>
-                <input
-                  id="admin-mla-sender"
-                  type="text"
-                  placeholder="278919564636"
-                  value={mlaForm.messagingSenderId}
-                  onChange={(e) =>
-                    setMlaForm((f) => ({ ...f, messagingSenderId: e.target.value }))
-                  }
-                  className="w-full min-h-[42px] px-3 py-2 bg-[#090E1A] border border-slate-800 rounded-lg text-slate-100 font-mono"
-                />
-              </div>
-              <div className="space-y-1">
-                <label htmlFor="admin-mla-apikey" className="text-slate-300 font-medium">
-                  Wallet Firebase API Key{' '}
-                  {mlaConfig?.hasApiKey && (
-                    <span className="text-emerald-400 font-mono">
-                      ({mlaConfig.apiKeyPreview || 'saved'})
-                    </span>
-                  )}
-                </label>
-                <input
-                  id="admin-mla-apikey"
-                  type="password"
-                  autoComplete="off"
-                  placeholder={
-                    mlaConfig?.hasApiKey
-                      ? 'Leave blank to keep stored key'
-                      : 'Enter Wallet Web API key'
-                  }
-                  value={mlaForm.apiKey}
-                  onChange={(e) => setMlaForm((f) => ({ ...f, apiKey: e.target.value }))}
-                  className="w-full min-h-[42px] px-3 py-2 bg-[#090E1A] border border-slate-800 rounded-lg text-slate-100 font-mono"
-                />
-              </div>
-              <div className="space-y-1">
-                <label htmlFor="admin-mla-col" className="text-slate-300 font-medium">
-                  Members Collection
-                </label>
-                <input
-                  id="admin-mla-col"
-                  type="text"
-                  value={mlaForm.membersCollection}
-                  onChange={(e) =>
-                    setMlaForm((f) => ({ ...f, membersCollection: e.target.value }))
-                  }
-                  className="w-full min-h-[42px] px-3 py-2 bg-[#090E1A] border border-slate-800 rounded-lg text-slate-100 font-mono"
-                />
-              </div>
-              <div className="space-y-1">
-                <label htmlFor="admin-mla-email" className="text-slate-300 font-medium">
-                  Email Field Name
-                </label>
-                <input
-                  id="admin-mla-email"
-                  type="text"
-                  value={mlaForm.emailField}
-                  onChange={(e) => setMlaForm((f) => ({ ...f, emailField: e.target.value }))}
-                  className="w-full min-h-[42px] px-3 py-2 bg-[#090E1A] border border-slate-800 rounded-lg text-slate-100 font-mono"
-                />
-              </div>
-              <div className="space-y-1">
-                <label htmlFor="admin-mla-balance" className="text-slate-300 font-medium">
-                  Balance Field Name
-                </label>
-                <input
-                  id="admin-mla-balance"
-                  type="text"
-                  value={mlaForm.balanceField}
-                  onChange={(e) => setMlaForm((f) => ({ ...f, balanceField: e.target.value }))}
-                  className="w-full min-h-[42px] px-3 py-2 bg-[#090E1A] border border-slate-800 rounded-lg text-slate-100 font-mono"
-                />
-              </div>
-              <div className="flex items-end sm:col-span-2 lg:col-span-2">
+              <div className="flex items-center md:col-span-2">
                 <button
                   type="submit"
-                  disabled={mlaSaving}
-                  className="w-full sm:w-auto min-h-[42px] px-6 py-2 font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg cursor-pointer"
+                  disabled={gatewaySaving}
+                  className="w-full sm:w-auto min-h-[42px] px-6 py-2 font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg cursor-pointer disabled:opacity-50"
                 >
-                  {mlaSaving ? 'Saving...' : 'Save Gateway Settings'}
+                  {gatewaySaving ? 'Saving...' : 'Save Gateway Settings'}
                 </button>
               </div>
             </form>

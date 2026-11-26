@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react';
 import {
-  ArrowLeft,
   ArrowRight,
   CheckCircle2,
   Crown,
@@ -102,8 +101,10 @@ function isBrokenHealth(conn: ProviderConnectionSummary): boolean {
 
 export function ConnectionsPage({
   onNavigate,
+  onBack,
 }: {
   onNavigate: (route: AppRoute) => void;
+  onBack?: () => void;
 }) {
   const { isPremium, isAdmin, connections, connectionsLoading, refreshProviderState } = useAuth();
   const hideModelDetails = isPremium && !isAdmin;
@@ -279,18 +280,9 @@ export function ConnectionsPage({
       <AppShell
         currentRoute="connections"
         pageTitle={displayProviderName}
-        breadcrumb="API Connections"
         onNavigate={onNavigate}
-        primaryAction={
-          <button
-            type="button"
-            onClick={() => setSelectedProviderId(null)}
-            className="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 text-xs font-medium bg-[#111827] hover:bg-slate-800 border border-slate-700 text-slate-200 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" />
-            All Providers
-          </button>
-        }
+        showBackButton
+        onBack={() => setSelectedProviderId(null)}
       >
         <div className="max-w-3xl space-y-5 animate-panel-enter">
           {/* Hero Provider Status Card */}
@@ -524,14 +516,15 @@ export function ConnectionsPage({
     <AppShell
       currentRoute="connections"
       pageTitle="API Connections"
-      breadcrumb="User Portal"
       onNavigate={onNavigate}
+      showBackButton
+      onBack={onBack || (() => onNavigate('portal'))}
       primaryAction={
         <button
           type="button"
           disabled={connectionsLoading}
           onClick={() => void refreshProviderState(true)}
-          className="inline-flex items-center gap-2 min-h-[40px] px-3.5 py-2 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition-colors whitespace-nowrap cursor-pointer disabled:opacity-60"
+          className="inline-flex items-center gap-2 min-h-[40px] px-3.5 py-2 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition-colors whitespace-nowrap cursor-pointer disabled:opacity-60"
         >
           <RefreshCw
             className={`w-3.5 h-3.5 ${connectionsLoading ? 'animate-spin' : ''}`}

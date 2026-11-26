@@ -14,20 +14,16 @@ import {
 } from './server/modelHealth.ts';
 import { runCouncilEngine, stopCouncilRun } from './server/orchestrator.ts';
 import {
-  createTutGatewayOrder,
-  getPublicWalletClientConfig,
-  getSafeMlaConfigForAdmin,
+  createTutGatewaySession,
+  getTutGatewayConfig,
   listAllGatewayOrders,
   listAllPayments,
   listUserGatewayOrders,
   listUserPayments,
-  lookupMlaMemberByEmail,
-  purchasePremiumWithMla,
   reviewManualPayment,
-  saveMlaConfig,
+  saveTutGatewayConfig,
   submitManualWalletPayment,
-  submitPendingGatewayReceipt,
-  verifyTutGatewayReturn,
+  verifyTutGatewayPayment,
 } from './server/payments.ts';
 import { runCouncilPreflight } from './server/preflight.ts';
 import { verifyAnthropicConnection } from './server/providers/anthropic.ts';
@@ -188,86 +184,6 @@ async function startServer() {
     }
   });
 
-  app.get('/api/payments/tut-gateway/config', requireFirebaseAuth, (_req, res) => {
-    try {
-      res.json(getPublicWalletClientConfig());
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      res.status(500).json({ error: redactSensitiveText(msg) });
-    }
-  });
-
-  app.post(
-    '/api/payments/mla/check',
-    requireFirebaseAuth,
-    connectionLimiter,
-    async (req: AuthenticatedRequest, res) => {
-      try {
-        const body = (req.body || {}) as { tutWalletIdToken?: unknown };
-        const cleanWalletToken =
-          typeof body.tutWalletIdToken === 'string' && body.tutWalletIdToken.trim().length > 20
-            ? body.tutWalletIdToken.trim()
-            : undefined;
-        const result = await lookupMlaMemberByEmail(
-          req.authUser!.email,
-          req.authUser!.idToken,
-          cleanWalletToken,
-        );
-        res.json({
-          configured: result.configured,
-          found: result.found,
-          member: result.member,
-          needsWalletSignIn: Boolean(result.needsWalletSignIn),
-          error: result.error || null,
-        });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        res.status(500).json({ error: redactSensitiveText(msg) });
-      }
-    },
-  );
-
-  app.post(
-    '/api/payments/mla/purchase',
-    requireFirebaseAuth,
-    connectionLimiter,
-    async (req: AuthenticatedRequest, res) => {
-      try {
-        const { cycle, tutWalletIdToken } = (req.body || {}) as {
-          cycle?: string;
-          tutWalletIdToken?: unknown;
-        };
-        const cleanCycle: SubscriptionCycle =
-          cycle === '3m' || cycle === '6m' || cycle === '1y' ? cycle : '1m';
-        const cleanWalletToken =
-          typeof tutWalletIdToken === 'string' && tutWalletIdToken.trim().length > 20
-            ? tutWalletIdToken.trim()
-            : undefined;
-        const result = await purchasePremiumWithMla({
-          uid: req.authUser!.uid,
-          email: req.authUser!.email,
-          idToken: req.authUser!.idToken,
-          tutWalletIdToken: cleanWalletToken,
-          cycle: cleanCycle,
-        });
-        const subscription = await getEffectiveSubscription(
-          req.authUser!.uid,
-          req.authUser!.idToken,
-          req.authUser!.email,
-        );
-        res.json({
-          ok: true,
-          payment: result.payment,
-          subscription,
-          updatedBalanceBdt: result.updatedBalanceBdt,
-        });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        res.status(400).json({ error: redactSensitiveText(msg) });
-      }
-    },
-  );
-
   app.post(
     '/api/payments/manual',
     requireFirebaseAuth,
@@ -304,10 +220,10 @@ async function startServer() {
   );
 
   app.post(
-    '/api/payments/tut-gateway/init',
+    '/api/payments/tut-gateway/create-session',
     requireFirebaseAuth,
     connectionLimiter,
-    (req: AuthenticatedRequest, res) => {
+    async (req: AuthenticatedRequest, res) => {
       try {
         const { cycle, returnUrl } = req.body as {
           cycle?: string;
@@ -331,7 +247,7 @@ async function startServer() {
           return;
         }
 
-        const result = createTutGatewayOrder({
+        const result = await createTutGatewaySession({
           uid: req.authUser!.uid,
           email: req.authUser!.email,
           cycle: cleanCycle,
@@ -355,49 +271,32 @@ async function startServer() {
     connectionLimiter,
     async (req: AuthenticatedRequest, res) => {
       try {
-        const { orderId, returnParams } = req.body as {
+        const { token, orderId, tutStatus } = req.body as {
+          token?: string;
           orderId?: string;
-          returnParams?: Record<string, unknown>;
+          tutStatus?: string;
         };
-        const cleanParams: Record<string, string> = {};
-        if (returnParams && typeof returnParams === 'object' && !Array.isArray(returnParams)) {
-          for (const [k, v] of Object.entries(returnParams).slice(0, 30)) {
-            if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
-              cleanParams[String(k).slice(0, 64)] = String(v).slice(0, 512);
-            }
-          }
-        }
 
-        const result = await verifyTutGatewayReturn({
+        const result = await verifyTutGatewayPayment({
           uid: req.authUser!.uid,
           email: req.authUser!.email,
+          token: typeof token === 'string' ? token : undefined,
           orderId: typeof orderId === 'string' ? orderId : undefined,
-          returnParams: cleanParams,
+          tutStatus: typeof tutStatus === 'string' ? tutStatus : undefined,
         });
 
-        if (result.verified) {
-          const subscription = await getEffectiveSubscription(
-            req.authUser!.uid,
-            req.authUser!.idToken,
-            req.authUser!.email,
-          );
-          res.json({
-            ok: true,
-            verified: true,
-            order: result.order,
-            payment: result.payment,
-            subscription,
-          });
-          return;
-        }
-
-        const statusCode = result.proxyBlocked ? 200 : 400;
-        res.status(statusCode).json({
-          ok: false,
-          verified: false,
-          proxyBlocked: Boolean(result.proxyBlocked),
+        const subscription = await getEffectiveSubscription(
+          req.authUser!.uid,
+          req.authUser!.idToken,
+          req.authUser!.email,
+        );
+        res.json({
+          ok: true,
+          verified: true,
           order: result.order,
-          error: result.error || 'T.U.T. receipt verification could not be confirmed.',
+          payment: result.payment,
+          subscription,
+          memoId: result.memoId,
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -406,33 +305,7 @@ async function startServer() {
     },
   );
 
-  app.post(
-    '/api/payments/tut-gateway/submit-receipt',
-    requireFirebaseAuth,
-    connectionLimiter,
-    (req: AuthenticatedRequest, res) => {
-      try {
-        const { orderId, receiptRef, note } = req.body as {
-          orderId?: string;
-          receiptRef?: string;
-          note?: string;
-        };
-        const payment = submitPendingGatewayReceipt({
-          uid: req.authUser!.uid,
-          email: req.authUser!.email,
-          orderId: typeof orderId === 'string' ? orderId : '',
-          receiptRef: typeof receiptRef === 'string' ? receiptRef : undefined,
-          note: typeof note === 'string' ? note : undefined,
-        });
-        res.json({ ok: true, payment });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        res.status(400).json({ error: redactSensitiveText(msg) });
-      }
-    },
-  );
-
-  // --- Admin Shared APIs, Payment Queue, Subscribers & MLA Config ---
+  // --- Admin Shared APIs, Payment Queue, Subscribers & Gateway Config ---
   app.get(
     '/api/admin/overview',
     requireFirebaseAuth,
@@ -444,7 +317,7 @@ async function startServer() {
         subscriptions: listActiveSubscriptions(),
         gatewayOrders: listAllGatewayOrders(),
         connections: getAdminSharedSummaries(),
-        mlaConfig: getSafeMlaConfigForAdmin(),
+        gatewayConfig: getTutGatewayConfig(),
       });
     },
   );
@@ -670,39 +543,26 @@ async function startServer() {
   );
 
   app.get(
-    '/api/admin/mla-config',
+    '/api/admin/gateway-config',
     requireFirebaseAuth,
     requireAdmin,
     (_req: AuthenticatedRequest, res) => {
-      res.json({ config: getSafeMlaConfigForAdmin() });
+      res.json({ config: getTutGatewayConfig() });
     },
   );
 
   app.post(
-    '/api/admin/mla-config',
+    '/api/admin/gateway-config',
     requireFirebaseAuth,
     requireAdmin,
     (req: AuthenticatedRequest, res) => {
       try {
         const body = req.body as Record<string, unknown>;
-        const updated = saveMlaConfig({
-          projectId: typeof body.projectId === 'string' ? body.projectId : undefined,
-          firestoreDatabaseId:
-            typeof body.firestoreDatabaseId === 'string' ? body.firestoreDatabaseId : undefined,
-          membersCollection:
-            typeof body.membersCollection === 'string' ? body.membersCollection : undefined,
-          emailField: typeof body.emailField === 'string' ? body.emailField : undefined,
-          balanceField: typeof body.balanceField === 'string' ? body.balanceField : undefined,
-          apiKey: typeof body.apiKey === 'string' ? body.apiKey : undefined,
-          authDomain: typeof body.authDomain === 'string' ? body.authDomain : undefined,
-          appId: typeof body.appId === 'string' ? body.appId : undefined,
-          storageBucket: typeof body.storageBucket === 'string' ? body.storageBucket : undefined,
-          messagingSenderId:
-            typeof body.messagingSenderId === 'string' ? body.messagingSenderId : undefined,
-          checkoutUrl: typeof body.checkoutUrl === 'string' ? body.checkoutUrl : undefined,
-          verifyReceiptUrl:
-            typeof body.verifyReceiptUrl === 'string' ? body.verifyReceiptUrl : undefined,
-          gatewayUrl: typeof body.gatewayUrl === 'string' ? body.gatewayUrl : undefined,
+        const updated = saveTutGatewayConfig({
+          gatewayBaseUrl:
+            typeof body.gatewayBaseUrl === 'string' ? body.gatewayBaseUrl : undefined,
+          merchantId: typeof body.merchantId === 'string' ? body.merchantId : undefined,
+          merchantName: typeof body.merchantName === 'string' ? body.merchantName : undefined,
         });
         res.json({ ok: true, config: updated });
       } catch (err) {

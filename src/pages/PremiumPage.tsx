@@ -1,15 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
-  ArrowLeft,
   ArrowRight,
   ArrowUpRight,
   Check,
   CheckCircle2,
-  ChevronDown,
   Copy,
+  CreditCard,
   Crown,
-  Landmark,
   RefreshCw,
   ShieldCheck,
   Smartphone,
@@ -19,31 +17,24 @@ import {
 import { AppShell, type AppRoute } from '../components/AppShell';
 import { useAuth } from '../contexts/AuthContext';
 import {
-  checkMlaMembershipApi,
-  fetchTutGatewayConfigApi,
-  initTutGatewayCheckoutApi,
-  purchasePremiumWithMlaApi,
+  createTutGatewaySessionApi,
   submitManualWalletPaymentApi,
-  submitPendingGatewayReceiptApi,
-  verifyTutGatewayCheckoutApi,
-  type TutGatewayPublicConfig,
+  verifyTutGatewayPaymentApi,
 } from '../lib/apiClient';
-import {
-  getCachedTutWalletToken,
-  signInTutWalletWithGoogle,
-} from '../lib/tutWalletFirebase';
 import {
   getPremiumPlan,
   PAYMENT_ACCOUNTS,
   PREMIUM_PLANS,
-  TUT_HOSTED_CHECKOUT_URL,
-  type MlaMemberInfo,
   type PaymentMethod,
   type PremiumPlanDefinition,
   type SubscriptionCycle,
 } from '../shared/types';
 
-export const TUT_GATEWAY_PENDING_KEY = 'tut_gateway_pending_order';
+export interface TutGatewayReturnParams {
+  tutToken?: string;
+  tutStatus?: string;
+  orderId?: string;
+}
 
 function formatDateLabel(iso?: string): string {
   if (!iso) return '—';
@@ -62,7 +53,7 @@ export function PremiumPage({
   onClearGatewayReturn,
 }: {
   onNavigate: (route: AppRoute) => void;
-  initialGatewayReturn?: Record<string, string> | null;
+  initialGatewayReturn?: TutGatewayReturnParams | null;
   onClearGatewayReturn?: () => void;
 }) {
   const {
@@ -79,30 +70,11 @@ export function PremiumPage({
   const [checkoutPlan, setCheckoutPlan] = useState<PremiumPlanDefinition | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('mla');
 
-  // Hosted Checkout & MLA state
+  // T.U.T. Card / Account Gateway state
   const [gatewayLaunching, setGatewayLaunching] = useState(false);
   const [gatewayVerifying, setGatewayVerifying] = useState(false);
   const [gatewayError, setGatewayError] = useState<string | null>(null);
-  const [gatewayProxyBlocked, setGatewayProxyBlocked] = useState<{
-    orderId: string;
-    receiptRef: string;
-    error: string;
-  } | null>(null);
-  const [gatewayReceiptInput, setGatewayReceiptInput] = useState('');
-  const [submittingFallbackReceipt, setSubmittingFallbackReceipt] = useState(false);
-  const verifiedReturnOrderRef = useRef<string | null>(null);
-
-  const [mlaDirectOpen, setMlaDirectOpen] = useState(false);
-  const [mlaChecking, setMlaChecking] = useState(false);
-  const [mlaConfigured, setMlaConfigured] = useState<boolean | null>(null);
-  const [mlaFound, setMlaFound] = useState<boolean>(false);
-  const [mlaMember, setMlaMember] = useState<MlaMemberInfo | null>(null);
-  const [mlaError, setMlaError] = useState<string | null>(null);
-  const [gatewayPublicConfig, setGatewayPublicConfig] = useState<TutGatewayPublicConfig | null>(null);
-  const [tutWalletToken, setTutWalletToken] = useState<string | null>(null);
-  const [tutWalletEmail, setTutWalletEmail] = useState<string | null>(null);
-  const [needsWalletSignIn, setNeedsWalletSignIn] = useState(false);
-  const [walletConnecting, setWalletConnecting] = useState(false);
+  const verifiedReturnKeyRef = useRef<string | null>(null);
 
   // bKash / Nagad state
   const [trxId, setTrxId] = useState('');
@@ -113,118 +85,31 @@ export function PremiumPage({
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [bannerSuccess, setBannerSuccess] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!user?.emailVerified) return;
-    let cancelled = false;
-    void fetchTutGatewayConfigApi()
-      .then((cfg) => {
-        if (!cancelled) setGatewayPublicConfig(cfg);
-      })
-      .catch(() => {
-        // Non-fatal fallback
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.emailVerified]);
-
-  const runGatewayReturnVerification = async (params: Record<string, string>) => {
-    const orderId = (params.orderId || params.order_id || '').trim();
-    if (!orderId) {
-      setGatewayError('Returned from T.U.T. Hosted Checkout without an orderId.');
-      return;
-    }
-
+  const runGatewayReturnVerification = async (params: TutGatewayReturnParams) => {
     setGatewayVerifying(true);
     setGatewayError(null);
-    setGatewayProxyBlocked(null);
 
     try {
-      const res = await verifyTutGatewayCheckoutApi(orderId, params);
+      const res = await verifyTutGatewayPaymentApi({
+        token: params.tutToken,
+        orderId: params.orderId,
+        tutStatus: params.tutStatus,
+      });
+
       if (res.verified) {
-        try {
-          window.sessionStorage.removeItem(TUT_GATEWAY_PENDING_KEY);
-        } catch {
-          // Ignore storage error
-        }
         onClearGatewayReturn?.();
         await Promise.all([refreshSubscription(), refreshProviderState(true)]);
         const planLabel = res.order ? getPremiumPlan(res.order.cycle).label : 'Premium';
-        const refLabel = res.payment?.trxId || orderId;
+        const memoSuffix = res.memoId ? ` · Memo ${res.memoId}` : '';
+        const orderSuffix = res.order?.orderId ? ` · ${res.order.orderId}` : '';
         setBannerSuccess(
-          `Council Premium (${planLabel}) verified and activated via T.U.T. Hosted Checkout · Ref ${refLabel}.`,
+          `Council Premium (${planLabel}) verified and activated via T.U.T. Card Gateway${orderSuffix}${memoSuffix}.`,
         );
-        return;
       }
-
-      if (res.proxyBlocked) {
-        let detectedRef =
-          params.receipt ||
-          params.receiptId ||
-          params.trxId ||
-          params.transactionId ||
-          orderId;
-
-        // Probe browser session against hosted verify-receipt (cannot self-activate without server verification)
-        try {
-          const verifyTarget =
-            gatewayPublicConfig?.verifyReceiptUrl ||
-            `${new URL(TUT_HOSTED_CHECKOUT_URL).origin}/api/gateway/verify-receipt`;
-          const clientRes = await fetch(verifyTarget, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({
-              orderId,
-              amount: res.order?.amountBdt,
-              merchant: res.order?.merchant,
-              receipt: params.receipt || undefined,
-              receiptId: params.receiptId || undefined,
-              trxId: params.trxId || undefined,
-              transactionId: params.transactionId || undefined,
-              params,
-            }),
-          });
-          if (clientRes.ok) {
-            const clientJson = (await clientRes.json().catch(() => null)) as Record<
-              string,
-              unknown
-            > | null;
-            if (clientJson) {
-              const maybeRef =
-                clientJson.trxId ||
-                clientJson.transactionId ||
-                clientJson.receiptId ||
-                clientJson.receipt;
-              if (typeof maybeRef === 'string' && maybeRef.trim()) {
-                detectedRef = maybeRef.trim();
-              }
-            }
-          }
-        } catch {
-          // Cross-origin / proxy block expected in preview sandbox
-        }
-
-        setGatewayReceiptInput(detectedRef);
-        setGatewayProxyBlocked({
-          orderId,
-          receiptRef: detectedRef,
-          error:
-            res.error ||
-            'Server-to-server receipt verification was blocked by preview cookie authentication.',
-        });
-        return;
-      }
-
-      setGatewayError(res.error || 'T.U.T. receipt verification could not be confirmed.');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg.toLowerCase().includes('cancelled') || msg.toLowerCase().includes('canceled')) {
-        try {
-          window.sessionStorage.removeItem(TUT_GATEWAY_PENDING_KEY);
-        } catch {
-          // Ignore
-        }
+      const lower = msg.toLowerCase();
+      if (lower.includes('cancel') || lower.includes('declined') || lower.includes('rejected')) {
         onClearGatewayReturn?.();
       }
       setGatewayError(msg);
@@ -235,11 +120,9 @@ export function PremiumPage({
 
   useEffect(() => {
     if (!initialGatewayReturn || !user?.emailVerified) return;
-    const key =
-      (initialGatewayReturn.orderId || initialGatewayReturn.order_id || '').trim() ||
-      JSON.stringify(initialGatewayReturn);
-    if (verifiedReturnOrderRef.current === key) return;
-    verifiedReturnOrderRef.current = key;
+    const key = JSON.stringify(initialGatewayReturn);
+    if (verifiedReturnKeyRef.current === key) return;
+    verifiedReturnKeyRef.current = key;
     void runGatewayReturnVerification(initialGatewayReturn);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialGatewayReturn, user?.emailVerified]);
@@ -253,128 +136,21 @@ export function PremiumPage({
     }
     setSelectedCycle(plan.cycle);
     setCheckoutPlan(plan);
-    setMlaError(null);
     setTrxId('');
     setSenderNumber('');
   };
 
-  const handleCheckMla = async (explicitWalletToken?: string) => {
-    setMlaChecking(true);
-    setMlaError(null);
-    setCheckoutError(null);
-    try {
-      let tokenToUse = explicitWalletToken || tutWalletToken || undefined;
-      if (!tokenToUse && gatewayPublicConfig?.walletFirebaseConfig) {
-        const cached = await getCachedTutWalletToken(gatewayPublicConfig.walletFirebaseConfig);
-        if (cached?.idToken) {
-          tokenToUse = cached.idToken;
-          setTutWalletToken(cached.idToken);
-          setTutWalletEmail(cached.email);
-        }
-      }
-      const res = await checkMlaMembershipApi(tokenToUse);
-      setMlaConfigured(res.configured);
-      setMlaFound(res.found);
-      setMlaMember(res.member);
-      setNeedsWalletSignIn(Boolean(res.needsWalletSignIn));
-      if (res.error) setMlaError(res.error);
-    } catch (err) {
-      setMlaError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setMlaChecking(false);
-    }
-  };
-
-  const handleConnectTutWallet = async () => {
-    if (!gatewayPublicConfig?.walletFirebaseConfig) return;
-    setWalletConnecting(true);
-    setMlaError(null);
-    try {
-      const authRes = await signInTutWalletWithGoogle(gatewayPublicConfig.walletFirebaseConfig);
-      setTutWalletToken(authRes.idToken);
-      setTutWalletEmail(authRes.email);
-      setNeedsWalletSignIn(false);
-      await handleCheckMla(authRes.idToken);
-    } catch (err) {
-      setMlaError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setWalletConnecting(false);
-    }
-  };
-
-  const handleLaunchTutHostedCheckout = async () => {
+  const handleLaunchTutCheckout = async () => {
     if (!checkoutPlan) return;
     setGatewayLaunching(true);
     setCheckoutError(null);
     try {
-      const returnUrl = window.location.origin + window.location.pathname;
-      const res = await initTutGatewayCheckoutApi(checkoutPlan.cycle, returnUrl);
-      try {
-        window.sessionStorage.setItem(
-          TUT_GATEWAY_PENDING_KEY,
-          JSON.stringify({
-            orderId: res.order.orderId,
-            cycle: checkoutPlan.cycle,
-            amountBdt: checkoutPlan.priceBdt,
-            startedAt: new Date().toISOString(),
-          }),
-        );
-      } catch {
-        // Ignore storage failure
-      }
+      const returnUrl = `${window.location.origin}/payment-callback`;
+      const res = await createTutGatewaySessionApi(checkoutPlan.cycle, returnUrl);
       window.location.href = res.checkoutUrl;
     } catch (err) {
       setCheckoutError(err instanceof Error ? err.message : String(err));
       setGatewayLaunching(false);
-    }
-  };
-
-  const handleSubmitFallbackGatewayReceipt = async () => {
-    if (!gatewayProxyBlocked) return;
-    setSubmittingFallbackReceipt(true);
-    setGatewayError(null);
-    try {
-      const payment = await submitPendingGatewayReceiptApi({
-        orderId: gatewayProxyBlocked.orderId,
-        receiptRef: gatewayReceiptInput.trim() || gatewayProxyBlocked.orderId,
-      });
-      try {
-        window.sessionStorage.removeItem(TUT_GATEWAY_PENDING_KEY);
-      } catch {
-        // Ignore
-      }
-      setGatewayProxyBlocked(null);
-      onClearGatewayReturn?.();
-      await refreshSubscription();
-      setBannerSuccess(
-        `T.U.T. Hosted Checkout receipt (${payment.trxId}) queued for Admin approval.`,
-      );
-    } catch (err) {
-      setGatewayError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSubmittingFallbackReceipt(false);
-    }
-  };
-
-  const handlePurchaseWithMla = async () => {
-    if (!checkoutPlan) return;
-    setSubmitting(true);
-    setCheckoutError(null);
-    try {
-      const res = await purchasePremiumWithMlaApi(
-        checkoutPlan.cycle,
-        tutWalletToken || undefined,
-      );
-      await refreshSubscription();
-      await refreshProviderState(true);
-      setCheckoutPlan(null);
-      setBannerSuccess(
-        `Premium (${checkoutPlan.label}) activated immediately via T.U.T. MLA Account. Remaining balance: ${res.updatedBalanceBdt.toLocaleString()}৳.`,
-      );
-    } catch (err) {
-      setCheckoutError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSubmitting(false);
     }
   };
 
@@ -422,30 +198,24 @@ export function PremiumPage({
       ? PAYMENT_ACCOUNTS[paymentMethod]
       : null;
 
-  const insufficientMlaBalance = Boolean(
-    checkoutPlan && mlaFound && mlaMember && mlaMember.balanceBdt < checkoutPlan.priceBdt,
-  );
-
   return (
     <AppShell
       currentRoute="premium"
       pageTitle="Council Premium"
-      breadcrumb="Membership"
       onNavigate={onNavigate}
       primaryAction={
         <button
           type="button"
-          onClick={() => onNavigate('dashboard')}
-          className="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+          onClick={() => onNavigate('new-council')}
+          className="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-colors whitespace-nowrap cursor-pointer"
         >
-          <ArrowLeft className="w-3.5 h-3.5" />
-          Back to Playground
+          Launch Council
         </button>
       }
     >
       <div className="space-y-8 pb-8">
         {/* Hero Header */}
-        <section className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 border-b border-slate-800/80 pb-6">
+        <section className="border-b border-slate-800/80 pb-6">
           <div className="space-y-2 max-w-2xl">
             <p className="text-xs font-semibold text-amber-400 flex items-center gap-1.5">
               <Crown className="w-4 h-4" />
@@ -460,25 +230,6 @@ export function PremiumPage({
             <p className="text-sm text-slate-400 leading-relaxed">
               Free accounts run on your own API keys (BYOK). Premium accounts use Admin-connected APIs automatically and select Council models by intelligence level using cycling priority: Gemini, Groq, OpenRouter, Cohere.
             </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            {user?.emailVerified && (
-              <button
-                type="button"
-                onClick={() => onNavigate('portal')}
-                className="min-h-[44px] px-4 py-2 text-xs font-medium bg-[#111827] hover:bg-slate-800 border border-slate-700 text-slate-200 rounded-xl transition-colors whitespace-nowrap cursor-pointer"
-              >
-                User Portal &amp; Validity
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => onNavigate('new-council')}
-              className="min-h-[44px] px-4 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-colors whitespace-nowrap cursor-pointer"
-            >
-              Launch Council
-            </button>
           </div>
         </section>
 
@@ -510,32 +261,23 @@ export function PremiumPage({
                 Admin-managed APIs and automatic cycling priority selection are active across New Council and AI Model Land.
               </p>
             </div>
-            <div className="flex flex-wrap items-center gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => onNavigate('portal')}
-                className="min-h-[42px] px-4 py-2 rounded-xl bg-[#090E1A] hover:bg-slate-800 border border-slate-700 text-slate-200 text-xs font-medium whitespace-nowrap cursor-pointer"
-              >
-                Validity &amp; Receipts
-              </button>
-              <button
-                type="button"
-                onClick={() => onNavigate('new-council')}
-                className="min-h-[42px] px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-semibold whitespace-nowrap cursor-pointer"
-              >
-                Start Auto Council
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => onNavigate('portal')}
+              className="min-h-[42px] px-4 py-2 rounded-xl bg-[#090E1A] hover:bg-slate-800 border border-slate-700 text-slate-200 text-xs font-medium whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              Validity &amp; Receipts
+            </button>
           </section>
         )}
 
-        {/* Slim Admin Portal Redirect Strip (Admin Billing moved to dedicated Admin Portal) */}
+        {/* Slim Admin Portal Redirect Strip */}
         {isAdmin && (
           <section className="rounded-xl border border-amber-500/30 bg-[#0D1426] px-5 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
             <div className="flex items-center gap-2.5 text-amber-200">
               <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0" />
               <span>
-                Admin billing approvals, subscriber validity controls, Shared API Pool, and T.U.T. PLA/MLA configuration now live in the dedicated Admin Portal.
+                Admin billing approvals, subscriber validity controls, Shared API Pool, and T.U.T. Gateway settings live in the dedicated Admin Portal.
               </span>
             </div>
             <button
@@ -554,7 +296,7 @@ export function PremiumPage({
             <div className="flex items-center gap-2.5 text-amber-200">
               <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
               <span>
-                Returned from T.U.T. Hosted Checkout ({initialGatewayReturn.orderId || 'Order'}). Sign in to verify your receipt and activate Premium.
+                Returned from T.U.T. Card Checkout. Sign in to verify your payment token and activate Premium.
               </span>
             </div>
             <button
@@ -570,7 +312,7 @@ export function PremiumPage({
         {gatewayVerifying && (
           <div className="rounded-xl border border-blue-700/60 bg-blue-950/35 p-4 flex items-center gap-3 text-sm text-blue-200">
             <RefreshCw className="w-4 h-4 text-blue-400 animate-spin shrink-0" />
-            <span>Verifying T.U.T. Hosted Checkout receipt with T.U.T. server...</span>
+            <span>Verifying payment token with T.U.T. Money Lending Authority Gateway...</span>
           </div>
         )}
 
@@ -581,7 +323,7 @@ export function PremiumPage({
               <span>{gatewayError}</span>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              {initialGatewayReturn && (
+              {initialGatewayReturn?.tutToken && (
                 <button
                   type="button"
                   disabled={gatewayVerifying}
@@ -603,51 +345,6 @@ export function PremiumPage({
               </button>
             </div>
           </div>
-        )}
-
-        {gatewayProxyBlocked && (
-          <section className="rounded-xl border border-amber-500/50 bg-[#121A2F] p-5 space-y-3 text-xs">
-            <div className="flex items-start gap-2.5">
-              <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-              <div className="space-y-1">
-                <p className="font-semibold text-amber-200">
-                  T.U.T. Receipt Needs Manual Confirmation ({gatewayProxyBlocked.orderId})
-                </p>
-                <p className="text-slate-300 leading-relaxed">
-                  {gatewayProxyBlocked.error} Enter your T.U.T. receipt or TrxID below to queue it for Admin approval, or retry verification if preview access is open.
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-col sm:flex-row gap-2">
-              <input
-                type="text"
-                value={gatewayReceiptInput}
-                onChange={(e) => setGatewayReceiptInput(e.target.value)}
-                placeholder="Receipt / TrxID / Order ID"
-                className="flex-1 min-h-[40px] px-3 py-1.5 bg-[#090E1A] border border-slate-700 rounded-lg text-slate-100 font-mono uppercase"
-              />
-              {initialGatewayReturn && (
-                <button
-                  type="button"
-                  disabled={gatewayVerifying}
-                  onClick={() => void runGatewayReturnVerification(initialGatewayReturn)}
-                  className="min-h-[40px] px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold cursor-pointer whitespace-nowrap"
-                >
-                  Retry Auto Verify
-                </button>
-              )}
-              <button
-                type="button"
-                disabled={submittingFallbackReceipt}
-                onClick={() => void handleSubmitFallbackGatewayReceipt()}
-                className="min-h-[40px] px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold cursor-pointer whitespace-nowrap disabled:opacity-50"
-              >
-                {submittingFallbackReceipt
-                  ? 'Queueing...'
-                  : 'Submit Receipt for Admin Approval'}
-              </button>
-            </div>
-          </section>
         )}
 
         {bannerSuccess && (
@@ -720,7 +417,7 @@ export function PremiumPage({
                 Choose Premium Duration
               </h3>
               <p className="text-xs text-slate-400">
-                Instant activation via T.U.T. Money Lending Authority Card/Account, or Send Money via bKash / Nagad.
+                Instant activation via T.U.T. Card Checkout, or Send Money via bKash / Nagad.
               </p>
             </div>
           </div>
@@ -788,11 +485,11 @@ export function PremiumPage({
         <section className="rounded-xl border border-slate-800 bg-[#111827] p-5 grid grid-cols-1 md:grid-cols-3 gap-5 text-xs">
           <div className="space-y-1">
             <p className="font-semibold text-slate-100 flex items-center gap-2">
-              <Landmark className="w-4 h-4 text-sky-400 shrink-0" />
-              <span>T.U.T. Money Lending Authority</span>
+              <CreditCard className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>T.U.T. Card Checkout</span>
             </p>
             <p className="text-slate-400 leading-relaxed">
-              Verified Gmail membership check &amp; live balance sync directly with MLA Firestore for instant activation.
+              Tamper-proof hosted session via T.U.T. Money Lending Authority Gateway with instant server-side token verification.
             </p>
           </div>
           <div className="space-y-1">
@@ -852,7 +549,9 @@ export function PremiumPage({
                       <td className="px-5 py-3 text-slate-200 whitespace-nowrap">
                         {getPremiumPlan(p.cycle).label}
                       </td>
-                      <td className="px-5 py-3 text-slate-300 uppercase">{p.method}</td>
+                      <td className="px-5 py-3 text-slate-300 uppercase">
+                        {p.method === 'mla' ? 'T.U.T. Gateway' : p.method}
+                      </td>
                       <td className="px-5 py-3 font-mono text-xs text-slate-300">{p.trxId}</td>
                       <td className="px-5 py-3 text-right font-medium text-slate-100">
                         {p.amountBdt}৳
@@ -893,7 +592,7 @@ export function PremiumPage({
         >
           <div
             className="fixed inset-0 bg-black/70"
-            onClick={() => !submitting && setCheckoutPlan(null)}
+            onClick={() => !submitting && !gatewayLaunching && setCheckoutPlan(null)}
           />
           <div className="relative z-10 w-full sm:max-w-lg max-h-[92dvh] overflow-y-auto rounded-t-3xl sm:rounded-2xl border border-slate-700 bg-[#0D1426] text-slate-100 p-6 space-y-5 shadow-2xl">
             <div className="flex items-start justify-between gap-4 border-b border-slate-800 pb-4">
@@ -905,7 +604,7 @@ export function PremiumPage({
               </div>
               <button
                 type="button"
-                disabled={submitting}
+                disabled={submitting || gatewayLaunching}
                 onClick={() => setCheckoutPlan(null)}
                 aria-label="Close checkout"
                 className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
@@ -920,7 +619,7 @@ export function PremiumPage({
               <div className="grid grid-cols-3 gap-2">
                 {(
                   [
-                    { id: 'mla', label: 'T.U.T. MLA' },
+                    { id: 'mla', label: 'T.U.T. Card' },
                     { id: 'bkash', label: 'bKash' },
                     { id: 'nagad', label: 'Nagad' },
                   ] as const
@@ -944,168 +643,35 @@ export function PremiumPage({
               </div>
             </div>
 
-            {/* 1. T.U.T. MLA Hosted Checkout + Direct Sync Flow */}
+            {/* 1. T.U.T. Money Lending Authority Card Checkout */}
             {paymentMethod === 'mla' && (
               <div className="space-y-4">
-                <div className="rounded-xl border border-amber-500/35 bg-[#121A2F] p-4 space-y-3 text-xs">
+                <div className="rounded-xl border border-amber-500/35 bg-[#121A2F] p-5 space-y-3.5 text-xs">
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-semibold text-amber-300 flex items-center gap-1.5">
-                      <Landmark className="w-4 h-4" />
-                      T.U.T. Hosted Checkout Gateway
+                      <CreditCard className="w-4 h-4" />
+                      T.U.T. Money Lending Authority Checkout
                     </span>
-                    <span className="font-mono text-slate-300 tabular-nums">
+                    <span className="font-mono text-slate-200 font-semibold tabular-nums">
                       {checkoutPlan.priceBdt}৳
                     </span>
                   </div>
                   <p className="text-slate-300 leading-relaxed">
-                    Opens T.U.T. Money Lending Authority Pay safely in your current window (mobile &amp; iframe ready), verifies your receipt on return, and activates <strong className="text-white">{checkoutPlan.label}</strong> automatically.
+                    Creates a tamper-proof checkout session on T.U.T. Money Lending Authority, redirects securely for Card / Account payment, verifies your paid token on return, and activates <strong className="text-white">{checkoutPlan.label}</strong> immediately.
                   </p>
                   <button
                     type="button"
                     disabled={gatewayLaunching || submitting}
-                    onClick={() => void handleLaunchTutHostedCheckout()}
+                    onClick={() => void handleLaunchTutCheckout()}
                     className="w-full min-h-[46px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 disabled:opacity-50 text-slate-950 text-sm font-bold cursor-pointer"
                   >
                     <span>
                       {gatewayLaunching
-                        ? 'Redirecting to T.U.T. Pay...'
-                        : `Pay ${checkoutPlan.priceBdt}৳ with T.U.T. Hosted Checkout`}
+                        ? 'Creating Secure Session...'
+                        : `Pay ${checkoutPlan.priceBdt}৳ with T.U.T. Gateway`}
                     </span>
                     <ArrowUpRight className="w-4 h-4" />
                   </button>
-                </div>
-
-                {/* Secondary collapsible Direct MLA Firestore Sync */}
-                <div className="rounded-xl border border-slate-800 bg-[#090E1A] overflow-hidden text-xs">
-                  <button
-                    type="button"
-                    onClick={() => setMlaDirectOpen((v) => !v)}
-                    className="w-full px-4 py-3 flex items-center justify-between text-slate-300 hover:text-white cursor-pointer"
-                  >
-                    <span className="font-medium">Direct MLA Gmail Balance Sync (Firestore)</span>
-                    <ChevronDown
-                      className={`w-4 h-4 text-slate-400 transition-transform ${
-                        mlaDirectOpen ? 'rotate-180' : ''
-                      }`}
-                    />
-                  </button>
-
-                  {mlaDirectOpen && (
-                    <div className="px-4 pb-4 pt-2 border-t border-slate-800 space-y-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-slate-400">Verified Gmail</span>
-                        <span className="font-medium text-slate-100 truncate">{user?.email}</span>
-                      </div>
-
-                      <div className="flex flex-col sm:flex-row gap-2">
-                        <button
-                          type="button"
-                          disabled={mlaChecking || walletConnecting}
-                          onClick={() => void handleCheckMla()}
-                          className="flex-1 min-h-[42px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-semibold cursor-pointer disabled:opacity-60"
-                        >
-                          <RefreshCw className={`w-3.5 h-3.5 ${mlaChecking ? 'animate-spin' : ''}`} />
-                          {mlaChecking
-                            ? 'Syncing T.U.T. Wallet Balance...'
-                            : 'Check MLA Membership & Balance'}
-                        </button>
-
-                        {gatewayPublicConfig?.walletFirebaseConfig && (
-                          <button
-                            type="button"
-                            disabled={walletConnecting || mlaChecking}
-                            onClick={() => void handleConnectTutWallet()}
-                            className={`min-h-[42px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold cursor-pointer disabled:opacity-60 whitespace-nowrap ${
-                              needsWalletSignIn
-                                ? 'bg-blue-600 hover:bg-blue-500 text-white'
-                                : 'bg-[#121A2F] hover:bg-slate-800 border border-slate-700 text-slate-200'
-                            }`}
-                          >
-                            <Wallet className="w-3.5 h-3.5" />
-                            {walletConnecting
-                              ? 'Connecting...'
-                              : tutWalletToken
-                                ? `Wallet Linked (${tutWalletEmail || 'Google'})`
-                                : 'Connect T.U.T. Wallet Account'}
-                          </button>
-                        )}
-                      </div>
-
-                      {mlaConfigured === false && (
-                        <div className="rounded-lg border border-amber-800/50 bg-amber-950/30 p-3 text-amber-200 leading-relaxed">
-                          Direct MLA Firestore Project ID is not linked. Use T.U.T. Hosted Checkout above or pay via bKash / Nagad.
-                        </div>
-                      )}
-
-                      {mlaConfigured && !mlaFound && !mlaError && (
-                        <div className="rounded-lg border border-slate-700 bg-slate-900 p-3 text-slate-300 leading-relaxed">
-                          No T.U.T. MLA member account found matching{' '}
-                          <strong className="text-white">{user?.email}</strong>.
-                        </div>
-                      )}
-
-                      {mlaError && (
-                        <div className="rounded-lg border border-rose-800/60 bg-rose-950/40 p-3 text-rose-300 leading-relaxed space-y-2">
-                          <p>{mlaError}</p>
-                          {needsWalletSignIn && gatewayPublicConfig?.walletFirebaseConfig && (
-                            <button
-                              type="button"
-                              disabled={walletConnecting}
-                              onClick={() => void handleConnectTutWallet()}
-                              className="inline-flex items-center gap-1.5 min-h-[34px] px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold cursor-pointer"
-                            >
-                              <Wallet className="w-3.5 h-3.5" />
-                              Authorize T.U.T. Wallet Google Account
-                            </button>
-                          )}
-                        </div>
-                      )}
-
-                      {mlaFound && mlaMember && (
-                        <div className="border-t border-slate-800 pt-3 space-y-2 tabular-nums">
-                          <div className="flex justify-between">
-                            <span className="text-slate-400">Member Name</span>
-                            <span className="font-medium text-slate-100">
-                              {mlaMember.displayName}
-                            </span>
-                          </div>
-                          {(mlaMember.cardLabel || mlaMember.accountNumber) && (
-                            <div className="flex justify-between">
-                              <span className="text-slate-400">Card / Account</span>
-                              <span className="font-mono text-slate-200">
-                                {mlaMember.cardLabel || mlaMember.accountNumber}
-                              </span>
-                            </div>
-                          )}
-                          <div className="flex justify-between">
-                            <span className="text-slate-400">Available Balance</span>
-                            <span
-                              className={`font-bold ${
-                                insufficientMlaBalance ? 'text-rose-400' : 'text-emerald-400'
-                              }`}
-                            >
-                              {mlaMember.balanceBdt.toLocaleString()}৳
-                            </span>
-                          </div>
-                          {insufficientMlaBalance && (
-                            <p className="text-rose-300 pt-1">
-                              Balance is {(checkoutPlan.priceBdt - mlaMember.balanceBdt).toFixed(0)}৳ short for {checkoutPlan.label}.
-                            </p>
-                          )}
-                          <button
-                            type="button"
-                            disabled={submitting || !mlaFound || insufficientMlaBalance}
-                            onClick={() => void handlePurchaseWithMla()}
-                            className="w-full min-h-[42px] px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-45 text-white text-xs font-bold cursor-pointer mt-2"
-                          >
-                            {submitting
-                              ? 'Deducting & Activating...'
-                              : `Deduct ${checkoutPlan.priceBdt}৳ from MLA Balance`}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
 
                 {checkoutError && (
